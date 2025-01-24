@@ -72,7 +72,6 @@ def powershell_command(command: str) -> str:
     注意：涉及危险操作时请务必添加-Force或-Confirm:$false参数
     """
     # 自动处理常见需要确认的命令
-    command = command.replace("/", "\\")
     sensitive_commands = ["Remove-Item", "Stop-Process", "Uninstall-Module"]
     for cmd in sensitive_commands:
         if cmd in command and "-Force" not in command and "-Confirm" not in command:
