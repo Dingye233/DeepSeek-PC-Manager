@@ -318,8 +318,6 @@ async def main(input_message:str):
 
 if __name__ == "__main__":
     while True:
-        # changed_word=response.choices[0].message.content
-        # print("大模型纠正后的文本: ", changed_word)
         user_message=input("输入消息: ")
         should_continue = asyncio.run(main(user_message))
         if not should_continue:
