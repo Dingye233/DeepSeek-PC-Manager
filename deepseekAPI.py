@@ -269,8 +269,6 @@ async def main(input_message:str):
                 elif func_name == "get_weather":
                     result = get_weather(args["city"])
                 elif func_name == "powershell_command":
-                    # 自动转换路径格式
-                    args["command"] = args["command"].replace("/", "\\")
                     result = powershell_command(args["command"])
                 elif func_name == "email_check":
                     result = email_check()
