@@ -31,4 +31,4 @@ DeepSeek-PC-Manager 是一个基于 DeepSeek 大模型的本地电脑管理工�
 
 ## 许可证
 
-本项目采用 MIT 许可证，详情请见 LICENSE 文件。
+本项目采用 Apache 许可证，详情请见 LICENSE 文件。
