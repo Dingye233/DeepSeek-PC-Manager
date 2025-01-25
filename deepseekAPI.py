@@ -244,9 +244,7 @@ tools = [
 client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
 messages = [{"role": "system",
              "content": "你叫小美你乐于助人，心地善良，活泼聪明，不要像个ai工具那样说话 "},
-            {"role": "system","content": "记得不要生成那种带有*和#的markdown显示的文本 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 3.路径中的斜杠要统一为反斜杠"},
-            {"role": "system",
-             "content": "涉及到数学公式的符号和格式话请用口头话术描述，不要用数学符号，如一道定积分: xdx，上积分为1下积分为0, 再比如x^2，直接说成x的平方或者2次方，以此类推类似的涉及到符号的东西都这样处理，像Δ直接叫做delta就行，σ叫做sigma等等"}]
+            {"role": "system","content": "记得不要生成那种带有*和#的markdown显示的文本 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 3.路径中的斜杠要统一为反斜杠"}]
 
 check_model_message=[{"role": "system",
          "content": "你是任务审查模型，需要审查用户的任务是否被模型完成，如果没有完成则补充下一步该干什么，最后再让被审查模型继续执行"}]
@@ -320,11 +318,10 @@ async def main(input_message:str):
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=messages,
-            temperature=2
+            temperature=1.5
         )
 
     assistant_message = response.choices[0].message.content
-    check_model_message.append({"role": "assistant","content":"被审查模型的输出结果" +assistant_message})
     print("小美:", assistant_message)
     messages.append({"role": "assistant", "content": assistant_message})
     # 使用 TTS 播放回答
