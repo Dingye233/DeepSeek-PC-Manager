@@ -18,6 +18,7 @@ import speech_recognition as sr
 import keyboard
 import time
 import python_tools
+import send_email
 from dotenv import load_dotenv
 load_dotenv()
 # 1. TTS 功能实现
@@ -138,7 +139,8 @@ def get_weather(city: str) -> str:
         return f"获取天气信息时出错：{str(e)}"
 def back_to_model(model_message: str):
     main(model_message)
-
+def send_mail(text:str,receiver:str,subject:str)->str:
+    return send_email.main(text,receiver,subject)
 # 3. 工具描述
 tools = [
     {
@@ -239,6 +241,31 @@ tools = [
                 "required": ["file_name", "encoding"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_mail",
+            "description":"发送一封邮件向指定邮箱",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "receiver": {
+                        "type": "string",
+                        "description":"收件人邮箱，请严格查看收件人邮箱是否是正确的邮箱格式"
+                    },
+                    "subject":{
+                        "type": "string",
+                        "description":"邮件主题"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description":"邮件的内容  (用html的模板编写以避免编码问题)"
+                    }
+                },
+                "required": ["receiver","subject","text"]
+            }
+        }
     }
 ]
 client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
@@ -288,6 +315,8 @@ async def main(input_message:str):
                     result = email_details(args["email_id"])
                 elif func_name == "encoding":
                     result = encoding(args["file_name"], args["encoding"])
+                elif func_name == "send_mail":
+                    result = send_mail(args["receiver"], args["subject"],args["text"])
                 else:
                     raise ValueError(f"未定义的工具调用: {func_name}")
 
