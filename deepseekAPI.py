@@ -17,7 +17,8 @@ import subprocess
 import speech_recognition as sr
 import keyboard
 import time
-
+from dotenv import load_dotenv
+load_dotenv()
 # 1. TTS 功能实现
 async def text_to_speech(text: str, voice: str = "zh-CN-XiaoxiaoNeural"):
     """
@@ -108,7 +109,7 @@ def get_weather(city: str) -> str:
     :return: 格式化的24小时天气信息字符串
     """
     try:
-        key = "507421c5003442dfaf5c270db1002786"
+        key =os.environ.get("key")
         weather_url = "https://devapi.qweather.com/v7/weather/24h"
         location_url = "https://geoapi.qweather.com/v2/city/lookup"
 
@@ -186,7 +187,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "powershell_command",
-            "description": "通过PowerShell终端来控制系统的一切操作（文件管理/进程控制/系统设置等）。注意：需要用户确认的命令必须添加-Force或-Confirm:$false参数！危险命令会自动添加安全参数。",
+            "description": "通过PowerShell终端来控制系统的一切操作（文件管理/进程控制/系统设置等）",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -227,7 +228,7 @@ tools = [
         }
     }
 ]
-client = OpenAI(api_key="sk-87de129bb7614cec8f45b668d512d095", base_url="https://api.deepseek.com")
+client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
 messages = [{"role": "system",
              "content": "你叫小美你乐于助人，心地善良，活泼聪明，不要像个ai工具那样说话 "},
             {"role": "system","content": "记得不要生成那种带有*和#的markdown显示的文本 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 3.路径中的斜杠要统一为反斜杠"},

@@ -5,6 +5,7 @@ import os
 from typing import List, Dict, Optional
 import functools
 import threading
+from dotenv import load_dotenv
 
 
 class IMAPConnectionManager:
@@ -237,8 +238,9 @@ class EmailRetriever:
 
 
 # QQ邮箱
-QQ_EMAIL = ""
-AUTH_CODE = ""
+load_dotenv()
+QQ_EMAIL = os.environ.get("QQ_EMAIL")
+AUTH_CODE = os.environ.get("AUTH_CODE")
 
 
 # 兼容原有接口的函数
