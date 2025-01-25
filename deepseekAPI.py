@@ -17,6 +17,7 @@ import subprocess
 import speech_recognition as sr
 import keyboard
 import time
+import python_tools
 from dotenv import load_dotenv
 load_dotenv()
 # 1. TTS 功能实现
@@ -51,7 +52,9 @@ async def text_to_speech(text: str, voice: str = "zh-CN-XiaoxiaoNeural"):
 
     except Exception as e:
         print(f"TTS 错误: {str(e)}")
+def encoding(file_name:str,code:str)->str:
 
+    return python_tools.encoding(code,file_name)
 
 def email_check()-> list:
     return get_email.retrieve_emails()
@@ -68,19 +71,8 @@ def get_current_time(timezone: str = "UTC") -> str:
 
 
 def powershell_command(command: str) -> str:
-    """
-    执行PowerShell命令并自动处理确认提示
-    注意：涉及危险操作时请务必添加-Force或-Confirm:$false参数
-    """
-    # 自动处理常见需要确认的命令
-    # sensitive_commands = ["Remove-Item", "Stop-Process", "Uninstall-Module"]
-    # for cmd in sensitive_commands:
-    #     if cmd in command and "-Force" not in command and "-Confirm" not in command:
-    #         command = f"{command} -Confirm:$false"
 
     try:
-        # 通过管道注入确认输入（Y换行）
-        # full_command = f"echo Y | {command}"
 
         result = subprocess.run(
             ["powershell.exe", "-Command", command],
@@ -226,6 +218,27 @@ tools = [
                 }
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "encoding",
+            "description": "创建一个任意后缀的文件，并且填写内容进去然后保存，最后返回一个该文件的绝对路径",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_name": {
+                        "type": "string",
+                        "description": "输入要创建的文件的名字和后缀 如:xxx.txt xxxx.py"
+                    },
+                    "encoding": {
+                        "type": "string",
+                        "description": "输入进文件的内容，可以是一段话也可以是代码"
+                    }
+                },
+                "required": ["file_name", "encoding"]
+            }
+        }
     }
 ]
 client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
@@ -275,6 +288,8 @@ async def main(input_message:str):
                     result = email_check()
                 elif func_name == "email_details":
                     result = email_details(args["email_id"])
+                elif func_name == "encoding":
+                    result = encoding(args["file_name"], args["encoding"])
                 else:
                     raise ValueError(f"未定义的工具调用: {func_name}")
 
