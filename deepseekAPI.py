@@ -8,15 +8,16 @@ import os
 import tempfile
 import requests
 import geopy
-import speech_recognition as sr
 import keyboard
 import threading
-import time
 import get_email
-import subprocess
 import speech_recognition as sr
 import keyboard
 import time
+import subprocess
+import re
+from queue import Queue, Empty
+from threading import Thread
 import python_tools
 import send_email
 from dotenv import load_dotenv
@@ -74,29 +75,102 @@ def R1_opt(message:str)->str:
 
     return R1(message)
 
+
 def powershell_command(command: str) -> str:
+    # 匹配常见确认提示的正则表达式
+    confirmation_pattern = re.compile(
+        r'(\[Y(es)?\]/\[N(o)?\]|确认|是否继续|Are you sure|\[Y/N\])',
+        re.IGNORECASE
+    )
+
+    # 启动PowerShell进程
+    proc = subprocess.Popen(
+        ["powershell.exe", "-Command", command],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding='utf-8',
+        errors='replace'
+    )
+
+    # 创建队列用于异步读取输出
+    stdout_queue = Queue()
+    stderr_queue = Queue()
+
+    def output_reader(stream, queue):
+        """持续读取流并将其内容放入队列"""
+        while True:
+            line = stream.readline()
+            if not line:
+                break
+            queue.put(line)
+        stream.close()
+
+    # 启动输出读取线程
+    Thread(target=output_reader, args=(proc.stdout, stdout_queue), daemon=True).start()
+    Thread(target=output_reader, args=(proc.stderr, stderr_queue), daemon=True).start()
+
+    output = []
+    error = []
+    output_buffer = ''
+    timeout = 60
+    start_time = time.time()
 
     try:
+        while True:
+            # 检查超时
+            if time.time() - start_time > timeout:
+                raise subprocess.TimeoutExpired(command, timeout)
 
-        result = subprocess.run(
-            ["powershell.exe", "-Command", command],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding='utf-8',
-            errors='replace',
-            timeout=60
-        )
+            # 处理标准输出
+            while True:
+                try:
+                    line = stdout_queue.get_nowait()
+                    output.append(line)
+                    output_buffer += line
 
-        output = result.stdout.strip()
-        if not output:
-            return "命令执行成功（无输出）"
-        return f"执行成功:\n{output}"
-    except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.strip() or "未知错误"
-        return f"命令执行失败（错误码 {e.returncode}）:\n{error_msg}"
+                    # 检测确认提示
+                    if confirmation_pattern.search(output_buffer):
+                        user_input = input("命令需要确认，请输入响应后回车：")
+                        proc.stdin.write(user_input + "\n")
+                        proc.stdin.flush()
+                        output_buffer = ''  # 清空缓冲区避免重复检测
+                        start_time = time.time()  # 重置超时计时
+                except Empty:
+                    break
+
+            # 处理错误输出
+            while True:
+                try:
+                    line = stderr_queue.get_nowait()
+                    error.append(line)
+                except Empty:
+                    break
+
+            # 检查进程状态
+            if proc.poll() is not None:
+                break
+
     except subprocess.TimeoutExpired:
-        return "错误：命令执行超时（超过60秒），可能正在等待用户输入"
+        proc.kill()
+        return "错误：命令执行超时（超过60秒）"
+
+    # 收集剩余输出
+    while not stdout_queue.empty():
+        output.append(stdout_queue.get_nowait())
+    while not stderr_queue.empty():
+        error.append(stderr_queue.get_nowait())
+
+    stdout = ''.join(output).strip()
+    stderr = ''.join(error).strip()
+
+    # 处理返回结果
+    if proc.returncode == 0:
+        return f"执行成功:\n{stdout}" if stdout else "命令执行成功（无输出）"
+    else:
+        error_msg = stderr or "未知错误"
+        return f"命令执行失败（错误码 {proc.returncode}）:\n{error_msg}"
 
 def get_weather(city: str) -> str:
     """
