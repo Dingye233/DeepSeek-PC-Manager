@@ -302,7 +302,7 @@ async def main(input_message:str):
 
     messages.append({"role": "user", "content": input_message})
     # check_model_message.append({"role": "user", "content": "这是用户的输入: "+input_message})
-    messages.append({"role": "assistant","content": "r1模型的输出结果: "+R1(str(messages))})
+    # messages.append({"role": "assistant","content": "r1模型的输出结果: "+R1(str(messages))})
     # 让模型自己决定是否需要使用工具
     response = client.chat.completions.create(
         model="deepseek-chat",
