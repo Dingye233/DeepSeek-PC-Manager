@@ -72,9 +72,7 @@ def get_current_time(timezone: str = "UTC") -> str:
     now = datetime.utcnow() if timezone == "UTC" else datetime.now()
     return now.strftime("%Y-%m-%d %H:%M:%S")
 def R1_opt(message:str)->str:
-
     return R1(message)
-
 
 async def powershell_command(command: str) -> str:
     """改进后的交互式命令执行函数"""
@@ -397,7 +395,7 @@ async def main(input_message:str):
         messages=messages,
         tools=tools,
         tool_choice="auto",
-        temperature=1.5
+        temperature=1.3
     )
 
     # 如果模型决定使用工具
@@ -457,7 +455,7 @@ async def main(input_message:str):
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=messages,
-            temperature=1.5
+            temperature=1.3
         )
 
     assistant_message = response.choices[0].message.content
