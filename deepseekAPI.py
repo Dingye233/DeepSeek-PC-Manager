@@ -273,13 +273,13 @@ tools = [
         "type": "function",
         "function": {
             "name":"R1_opt",
-            "description":"调用更强大的深度思考模型来优化内容输出或者代码输出(返回一个string)(只做内容上的优化)",
+            "description":"当问题解决不了时调用更强大的r1深度思考模型来获取内容和答案给模型参考(返回的输出是string)",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "message": {
                         "type": "string",
-                        "description":"需要优化的文本内容或代码"
+                        "description":"需要解决的文本和代码或者其他内容"
                     }
                 },
                 "required": ["message"]

@@ -206,7 +206,7 @@
       <workItem from="1737806725058" duration="594000" />
       <workItem from="1737807373029" duration="7366000" />
       <workItem from="1737863405386" duration="2725000" />
-      <workItem from="1737866174396" duration="5577000" />
+      <workItem from="1737866174396" duration="6108000" />
     </task>
     <servers />
   </component>
@@ -229,7 +229,7 @@
     <SUITE FILE_PATH="coverage/PC_Agent_V1$send_email.coverage" NAME="send_email 覆盖结果" MODIFIED="1737804866497" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$aaaa.coverage" NAME="aaaa 覆盖结果" MODIFIED="1737866010749" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$example.coverage" NAME="example 覆盖结果" MODIFIED="1737793319679" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/PC_Agent_V1$deepseekAPI.coverage" NAME="deepseekAPI 覆盖结果" MODIFIED="1737871890545" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/PC_Agent_V1$deepseekAPI.coverage" NAME="deepseekAPI 覆盖结果" MODIFIED="1737872331023" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$python_tools.coverage" NAME="python_tools 覆盖结果" MODIFIED="1737793314863" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
 </project>
