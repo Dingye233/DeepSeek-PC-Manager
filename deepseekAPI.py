@@ -76,101 +76,102 @@ def R1_opt(message:str)->str:
     return R1(message)
 
 
-def powershell_command(command: str) -> str:
-    # 匹配常见确认提示的正则表达式
-    confirmation_pattern = re.compile(
-        r'(\[Y(es)?\]/\[N(o)?\]|确认|是否继续|Are you sure|\[Y/N\])',
+async def powershell_command(command: str) -> str:
+    """改进后的交互式命令执行函数"""
+    interaction_pattern = re.compile(
+        r'(?:Overwrite|确认|Enter|输入|密码|passphrase|file name|\[Y/N\]|是否继续)',
         re.IGNORECASE
     )
 
-    # 启动PowerShell进程
-    proc = subprocess.Popen(
-        ["powershell.exe", "-Command", command],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding='utf-8',
-        errors='replace'
+    proc = await asyncio.create_subprocess_exec(
+        "powershell.exe", "-Command", command,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        limit=1024 * 1024  # 1MB缓冲区
     )
-
-    # 创建队列用于异步读取输出
-    stdout_queue = Queue()
-    stderr_queue = Queue()
-
-    def output_reader(stream, queue):
-        """持续读取流并将其内容放入队列"""
-        while True:
-            line = stream.readline()
-            if not line:
-                break
-            queue.put(line)
-        stream.close()
-
-    # 启动输出读取线程
-    Thread(target=output_reader, args=(proc.stdout, stdout_queue), daemon=True).start()
-    Thread(target=output_reader, args=(proc.stderr, stderr_queue), daemon=True).start()
 
     output = []
     error = []
-    output_buffer = ''
+    buffer = ''
     timeout = 60
-    start_time = time.time()
+    last_active = time.time()
+
+    async def watch_output(stream, is_stderr=False):
+        """异步读取输出流"""
+        nonlocal buffer, last_active
+        while True:
+            try:
+                chunk = await stream.read(100)
+                if not chunk:
+                    break
+                decoded = chunk.decode('utf-8', errors='replace')
+
+                # 实时输出到控制台
+                print(decoded, end='', flush=True)
+
+                buffer += decoded
+                if is_stderr:
+                    error.append(decoded)
+                else:
+                    output.append(decoded)
+
+                # 检测到交互提示
+                if interaction_pattern.search(buffer):
+                    # 挂起当前协程，等待用户输入
+                    user_input = await get_user_input_async("\n需要确认，请输入响应后回车：")
+                    proc.stdin.write(f"{user_input}\n".encode())
+                    await proc.stdin.drain()
+                    buffer = ''
+                    last_active = time.time()
+
+            except Exception as e:
+                print(f"读取错误: {str(e)}")
+                break
+
+    # 创建输出监控任务
+    stdout_task = asyncio.create_task(watch_output(proc.stdout))
+    stderr_task = asyncio.create_task(watch_output(proc.stderr, True))
 
     try:
         while True:
             # 检查超时
-            if time.time() - start_time > timeout:
-                raise subprocess.TimeoutExpired(command, timeout)
-
-            # 处理标准输出
-            while True:
-                try:
-                    line = stdout_queue.get_nowait()
-                    output.append(line)
-                    output_buffer += line
-
-                    # 检测确认提示
-                    if confirmation_pattern.search(output_buffer):
-                        user_input = input("命令需要确认，请输入响应后回车：")
-                        proc.stdin.write(user_input + "\n")
-                        proc.stdin.flush()
-                        output_buffer = ''  # 清空缓冲区避免重复检测
-                        start_time = time.time()  # 重置超时计时
-                except Empty:
-                    break
-
-            # 处理错误输出
-            while True:
-                try:
-                    line = stderr_queue.get_nowait()
-                    error.append(line)
-                except Empty:
-                    break
+            if time.time() - last_active > timeout:
+                raise asyncio.TimeoutError()
 
             # 检查进程状态
-            if proc.poll() is not None:
+            if proc.returncode is not None:
                 break
 
-    except subprocess.TimeoutExpired:
-        proc.kill()
+            await asyncio.sleep(0.1)
+
+    except asyncio.TimeoutError:
+        proc.terminate()
         return "错误：命令执行超时（超过60秒）"
 
-    # 收集剩余输出
-    while not stdout_queue.empty():
-        output.append(stdout_queue.get_nowait())
-    while not stderr_queue.empty():
-        error.append(stderr_queue.get_nowait())
+    finally:
+        await stdout_task
+        await stderr_task
 
+    # 收集最终输出
     stdout = ''.join(output).strip()
     stderr = ''.join(error).strip()
 
-    # 处理返回结果
     if proc.returncode == 0:
         return f"执行成功:\n{stdout}" if stdout else "命令执行成功（无输出）"
     else:
         error_msg = stderr or "未知错误"
         return f"命令执行失败（错误码 {proc.returncode}）:\n{error_msg}"
+
+
+# 2. 新增异步输入函数
+async def get_user_input_async(prompt: str) -> str:
+    """异步获取用户输入"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: input(prompt))
+
+
+
 
 def get_weather(city: str) -> str:
     """
@@ -415,7 +416,7 @@ async def main(input_message:str):
                 elif func_name == "get_weather":
                     result = get_weather(args["city"])
                 elif func_name == "powershell_command":
-                    result = powershell_command(args["command"])
+                    result = await powershell_command(args["command"])
                 elif func_name == "email_check":
                     result = email_check()
                 elif func_name == "email_details":
