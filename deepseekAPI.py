@@ -20,6 +20,7 @@ import time
 import python_tools
 import send_email
 from dotenv import load_dotenv
+from R1_optimize import r1_optimizer as R1
 load_dotenv()
 # 1. TTS 功能实现
 async def text_to_speech(text: str, voice: str = "zh-CN-XiaoxiaoNeural"):
@@ -69,7 +70,9 @@ def email_details(email_id:str)-> dict:
 def get_current_time(timezone: str = "UTC") -> str:
     now = datetime.utcnow() if timezone == "UTC" else datetime.now()
     return now.strftime("%Y-%m-%d %H:%M:%S")
+def R1_opt(message:str)->str:
 
+    return R1(message)
 
 def powershell_command(command: str) -> str:
 
@@ -137,8 +140,8 @@ def get_weather(city: str) -> str:
 
     except Exception as e:
         return f"获取天气信息时出错：{str(e)}"
-def back_to_model(model_message: str):
-    main(model_message)
+# def back_to_model(model_message: str):
+#     main(model_message)
 def send_mail(text:str,receiver:str,subject:str)->str:
     return send_email.main(text,receiver,subject)
 # 3. 工具描述
@@ -266,12 +269,29 @@ tools = [
                 "required": ["receiver","subject","text"]
             }
         }
+    },{
+        "type": "function",
+        "function": {
+            "name":"R1_opt",
+            "description":"调用更强大的深度思考模型来优化内容输出或者代码输出(返回一个string)(只做内容上的优化)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description":"需要优化的文本内容或代码"
+                    }
+                },
+                "required": ["message"]
+            }
+        }
     }
 ]
+
 client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
 messages = [{"role": "system",
              "content": "你叫小美你乐于助人，心地善良，活泼聪明，不要像个ai工具那样说话 "},
-            {"role": "system","content": "记得不要生成那种带有*和#的markdown显示的文本 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 3.路径中的斜杠要统一为反斜杠"}]
+            {"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "}]
 
 check_model_message=[{"role": "system",
          "content": "你是任务审查模型，需要审查用户的任务是否被模型完成，如果没有完成则补充下一步该干什么，最后再让被审查模型继续执行"}]
@@ -281,8 +301,8 @@ async def main(input_message:str):
         return False
 
     messages.append({"role": "user", "content": input_message})
-    check_model_message.append({"role": "user", "content": "这是用户的输入: "+input_message})
-
+    # check_model_message.append({"role": "user", "content": "这是用户的输入: "+input_message})
+    messages.append({"role": "assistant","content": "r1模型的输出结果: "+R1(str(messages))})
     # 让模型自己决定是否需要使用工具
     response = client.chat.completions.create(
         model="deepseek-chat",
@@ -317,6 +337,8 @@ async def main(input_message:str):
                     result = encoding(args["file_name"], args["encoding"])
                 elif func_name == "send_mail":
                     result = send_mail(args["receiver"], args["subject"],args["text"])
+                elif func_name == "R1_opt":
+                    result = R1(args["message"])
                 else:
                     raise ValueError(f"未定义的工具调用: {func_name}")
 
