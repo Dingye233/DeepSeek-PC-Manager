@@ -21,7 +21,6 @@ import python_tools
 import send_email
 from dotenv import load_dotenv
 from R1_optimize import r1_optimizer as R1
-from R1_optimize import collect_user_information as inf
 load_dotenv()
 # 1. TTS 功能实现
 async def text_to_speech(text: str, voice: str = "zh-CN-XiaoxiaoNeural"):
@@ -397,11 +396,11 @@ async def main(input_message:str):
 if __name__ == "__main__":
     if not os.path.exists("user_information.txt"):
         with open("user_information.txt", "w", encoding="utf-8") as file:
-            file.write(" ")
+            file.write("用户关键信息表:user_information.txt")
         print(f"文件 '{"user_information.txt"}' 已创建")
     while True:
         user_message = input("输入消息: ")
-        inf("user_text: "+user_message)
+        # inf(user_message)
         should_continue = asyncio.run(main(user_message))
         if not should_continue:
             break
