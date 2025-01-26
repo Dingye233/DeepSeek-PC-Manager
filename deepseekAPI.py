@@ -21,6 +21,7 @@ import python_tools
 import send_email
 from dotenv import load_dotenv
 from R1_optimize import r1_optimizer as R1
+from R1_optimize import collect_user_information as inf
 load_dotenv()
 # 1. TTS 功能实现
 async def text_to_speech(text: str, voice: str = "zh-CN-XiaoxiaoNeural"):
@@ -144,6 +145,19 @@ def get_weather(city: str) -> str:
 #     main(model_message)
 def send_mail(text:str,receiver:str,subject:str)->str:
     return send_email.main(text,receiver,subject)
+def user_information_read()->str:
+    try:
+        # 尝试打开文件并读取内容
+        with open("user_information.txt", "r", encoding="utf-8") as file:
+            content = file.read()
+        return content
+    except FileNotFoundError:
+        # 如果文件不存在，捕获异常并返回提示信息
+        return f"错误：找不到文件 '{"user_information.txt"}'，请检查路径是否正确。"
+    except Exception as e:
+        # 捕获其他可能的异常（如编码错误）
+        return f"读取文件时发生错误：{e}"
+
 # 3. 工具描述
 tools = [
     {
@@ -291,8 +305,8 @@ tools = [
 client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
 messages = [{"role": "system",
              "content": "你叫小美你乐于助人，心地善良，活泼聪明，不要像个ai工具那样说话 "},
-            {"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "}]
-
+            {"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "},
+            {"role": "system","content": " 这些是用户的一些关键信息，可能有用: "+user_information_read()}]
 check_model_message=[{"role": "system",
          "content": "你是任务审查模型，需要审查用户的任务是否被模型完成，如果没有完成则补充下一步该干什么，最后再让被审查模型继续执行"}]
 async def main(input_message:str):
@@ -381,8 +395,13 @@ async def main(input_message:str):
 
 
 if __name__ == "__main__":
+    if not os.path.exists("user_information.txt"):
+        with open("user_information.txt", "w", encoding="utf-8") as file:
+            file.write(" ")
+        print(f"文件 '{"user_information.txt"}' 已创建")
     while True:
-        user_message=input("输入消息: ")
+        user_message = input("输入消息: ")
+        inf("user_text: "+user_message)
         should_continue = asyncio.run(main(user_message))
         if not should_continue:
             break
