@@ -90,7 +90,7 @@ async def powershell_command(command: str) -> str:
     output = []
     error = []
     buffer = ''
-    timeout = 60
+    timeout = 240
     last_active = time.time()
 
     async def watch_output(stream, is_stderr=False):
@@ -143,7 +143,7 @@ async def powershell_command(command: str) -> str:
 
     except asyncio.TimeoutError:
         proc.terminate()
-        return "错误：命令执行超时（超过60秒）"
+        return "错误：命令执行超时（超过240秒）"
 
     finally:
         await stdout_task
