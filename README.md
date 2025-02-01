@@ -11,9 +11,58 @@ DeepSeek-PC-Manager 是一个基于 DeepSeek 大模型的本地电脑管理工�
 5. **系统管理**: 基本的系统管理功能，如进程控制、系统设置等。
 6. **脚本编写与运行**: 最近新增功能，支持通过大模型编写脚本并运行。
 
+## 安装说明
+
+### 1. 安装 Python
+确保您的系统已安装 Python 3.x 版本。可以从 [Python 官网](https://www.python.org/downloads/) 下载安装。
+
+### 2. 安装依赖
+在项目根目录下，运行以下命令安装所需依赖：
+
+#### Windows
+```bash
+pip install -r requirements.txt
+```
+
+#### Linux/MacOS
+```bash
+pip3 install -r requirements.txt
+```
+
+将以下内容保存为 `requirements.txt`：
+```
+openai
+python-dotenv
+edge-tts
+playsound
+requests
+geopy
+keyboard
+SpeechRecognition
+```
+
+### 3. 本地模块
+以下模块为项目本地模块，无需单独安装：
+- `get_email`
+- `python_tools`
+- `send_email`
+- `R1_optimize`
+
+其他标准库（无需安装）：
+- `json`
+- `datetime`
+- `asyncio`
+- `os`
+- `tempfile`
+- `threading`
+- `time`
+- `subprocess`
+- `re`
+- `queue`
+
 ## 使用说明
 
-1. **安装依赖**: 确保已安装 Python 3.x 和必要的依赖库。
+1. **配置环境变量**: 在项目根目录创建 `.env` 文件，配置必要的环境变量。
 2. **运行项目**: 在项目目录下运行 `python main.py` 启动项目。
 3. **交互使用**: 通过自然语言与系统交互，执行所需操作。
 

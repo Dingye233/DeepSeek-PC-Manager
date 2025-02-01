@@ -27,8 +27,6 @@ load_dotenv()
 async def text_to_speech(text: str, voice: str = "zh-CN-XiaoxiaoNeural"):
     """
     将文本转换为语音并播放
-    :param text: 要转换的文本
-    :param voice: 声音选择，默认使用微软小晓声音
     """
     try:
         temp_file = None
@@ -379,91 +377,127 @@ messages = [{"role": "system",
              "content": "你叫小美你乐于助人，心地善良，活泼聪明，不要像个ai工具那样说话 "},
             {"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "},
             {"role": "system","content": " 这些是用户的一些关键信息，可能有用: "+user_information_read()}]
-check_model_message=[{"role": "system",
-         "content": "你是任务审查模型，需要审查用户的任务是否被模型完成，如果没有完成则补充下一步该干什么，最后再让被审查模型继续执行"}]
-async def main(input_message:str):
+# check_model_message=[{"role": "system",
+#          "content": "你是任务审查模型，需要审查用户的任务是否被模型完成，如果没有完成则补充下一步该干什么，最后再让被审查模型继续执行"}]
 
+
+async def main(input_message: str):
     if input_message.lower() == 'quit':
         return False
 
     messages.append({"role": "user", "content": input_message})
-    # check_model_message.append({"role": "user", "content": "这是用户的输入: "+input_message})
-    # messages.append({"role": "assistant","content": "r1模型的输出结果: "+R1(str(messages))})
-    # 让模型自己决定是否需要使用工具
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=messages,
-        tools=tools,
-        tool_choice="auto",
-        temperature=1.3
-    )
 
-    # 如果模型决定使用工具
-    if response.choices[0].message.tool_calls:
-        tool_calls = response.choices[0].message.tool_calls
-        tool_outputs = []
-
-        for tool_call in tool_calls:
-            func_name = tool_call.function.name
-            args = json.loads(tool_call.function.arguments)
-
-            try:
-                # 带错误处理的工具调用
-                if func_name == "get_current_time":
-                    result = get_current_time(args.get("timezone", "UTC"))
-                elif func_name == "get_weather":
-                    result = get_weather(args["city"])
-                elif func_name == "powershell_command":
-                    result = await powershell_command(args["command"])
-                elif func_name == "email_check":
-                    result = email_check()
-                elif func_name == "email_details":
-                    result = email_details(args["email_id"])
-                elif func_name == "encoding":
-                    result = encoding(args["file_name"], args["encoding"])
-                elif func_name == "send_mail":
-                    result = send_mail(args["receiver"], args["subject"],args["text"])
-                elif func_name == "R1_opt":
-                    result = R1(args["message"])
-                else:
-                    raise ValueError(f"未定义的工具调用: {func_name}")
-
-            except Exception as e:
-                result = f"工具执行失败: {str(e)}"
-
-            tool_outputs.append({
-                "tool_call_id": tool_call.id,
-                "output": str(result)
-            })
-        messages.append({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": response.choices[0].message.tool_calls
-        })
-        for output in tool_outputs:
-            messages.append({
-                "role": "tool",
-                "tool_call_id": output["tool_call_id"],
-                "content": output["output"]
-            })
-            check_model_message.append({
-                "role": "tool",
-                "tool_call_id": output["tool_call_id"],
-                "content": "模型调用结果: "+output["output"]
-            })
-
+    try:
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=messages,
+            tools=tools,
+            tool_choice="auto",
             temperature=1.3
         )
+        print("API 调用成功")
+        print("Raw Response:", response)
 
-    assistant_message = response.choices[0].message.content
-    print("小美:", assistant_message)
-    messages.append({"role": "assistant", "content": assistant_message})
-    # 使用 TTS 播放回答
-    # await text_to_speech(assistant_message)
-    return True
+    except Exception as e:
+        print("\n===== API 错误信息 =====")
+        print(f"错误类型: {type(e)}")
+        print(f"错误信息: {str(e)}")
+        if hasattr(e, 'response'):
+            print(f"响应状态码: {e.response.status_code}")
+            print(f"响应内容: {e.response.text}")
+        print("========================\n")
+        return True
+
+    try:
+        # 如果模型决定使用工具
+        if response.choices[0].message.tool_calls:
+            tool_calls = response.choices[0].message.tool_calls
+            tool_outputs = []
+
+            for tool_call in tool_calls:
+                try:
+                    func_name = tool_call.function.name
+                    args = json.loads(tool_call.function.arguments)
+                    print(f"\n正在执行工具: {func_name}")
+                    print(f"参数: {args}")
+                    if func_name == "get_current_time":
+                        result = get_current_time(args.get("timezone", "UTC"))
+                    elif func_name == "get_weather":
+                        result = get_weather(args["city"])
+                    elif func_name == "powershell_command":
+                        result = await powershell_command(args["command"])
+                    elif func_name == "email_check":
+                        result = email_check()
+                    elif func_name == "email_details":
+                        result = email_details(args["email_id"])
+                    elif func_name == "encoding":
+                        result = encoding(args["file_name"], args["encoding"])
+                    elif func_name == "send_mail":
+                        result = send_mail(args["text"], args["receiver"], args["subject"])
+                    elif func_name == "R1_opt":
+                        result = R1_opt(args["message"])
+                    else:
+                        raise ValueError(f"未定义的工具调用: {func_name}")
+
+                    print(f"工具执行结果: {result}")
+
+                except Exception as e:
+                    error_msg = f"工具执行失败: {str(e)}"
+                    print(f"\n===== 工具执行错误 =====")
+                    print(f"工具名称: {func_name}")
+                    print(f"错误类型: {type(e)}")
+                    print(f"错误信息: {str(e)}")
+                    print("========================\n")
+                    result = error_msg
+
+                tool_outputs.append({
+                    "tool_call_id": tool_call.id,
+                    "output": str(result)
+                })
+
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": response.choices[0].message.tool_calls
+            })
+
+            for output in tool_outputs:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": output["tool_call_id"],
+                    "content": output["output"]
+                })
+
+            try:
+                print("\n正在获取最终响应...")
+                response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=messages,
+                    temperature=1.3
+                )
+                print("最终响应获取成功")
+
+            except Exception as e:
+                print("\n===== 最终响应错误 =====")
+                print(f"错误类型: {type(e)}")
+                print(f"错误信息: {str(e)}")
+                if hasattr(e, 'response'):
+                    print(f"响应状态码: {e.response.status_code}")
+                    print(f"响应内容: {e.response.text}")
+                print("========================\n")
+                return True
+
+        assistant_message = response.choices[0].message.content
+        print("\n小美:", assistant_message)
+        messages.append({"role": "assistant", "content": assistant_message})
+        return True
+
+    except Exception as e:
+        print("\n===== 程序执行错误 =====")
+        print(f"错误类型: {type(e)}")
+        print(f"错误信息: {str(e)}")
+        print("========================\n")
+        return True
 
 
 if __name__ == "__main__":
@@ -471,9 +505,19 @@ if __name__ == "__main__":
         with open("user_information.txt", "w", encoding="utf-8") as file:
             file.write("用户关键信息表:user_information.txt")
         print(f"文件 '{"user_information.txt"}' 已创建")
+
+    print("程序启动成功")
     while True:
-        user_message = input("输入消息: ")
-        # inf(user_message)
-        should_continue = asyncio.run(main(user_message))
-        if not should_continue:
+        try:
+            user_message = input("\n输入消息: ")
+            should_continue = asyncio.run(main(user_message))
+            if not should_continue:
+                break
+        except KeyboardInterrupt:
+            print("\n程序已被用户中断")
             break
+        except Exception as e:
+            print("\n===== 主程序错误 =====")
+            print(f"错误类型: {type(e)}")
+            print(f"错误信息: {str(e)}")
+            print("=====================\n")
