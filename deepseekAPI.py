@@ -20,6 +20,7 @@ from queue import Queue, Empty
 from threading import Thread
 import python_tools
 import send_email
+import ssh_controller
 from dotenv import load_dotenv
 from R1_optimize import r1_optimizer as R1
 load_dotenv()
@@ -227,9 +228,30 @@ def user_information_read()->str:
     except Exception as e:
         # 捕获其他可能的异常（如编码错误）
         return f"读取文件时发生错误：{e}"
-
+def ssh(command:str)->str:
+    ip = "192.168.10.107"
+    username = "ye"
+    password = "147258"
+    ssh_controller.ssh_interactive_command(ip,username,password,command)
 # 3. 工具描述
 tools = [
+    {
+        "type":"function",
+        "function":{
+           "name":"ssh",
+            "description":"通过ssh远程连接ubuntu服务器并且输入命令控制远程服务器",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "command":{
+                        "type":"string",
+                        "description":"ubuntu服务器的命令"
+                    }
+                },
+                "required": ["command"]
+            }
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -242,7 +264,7 @@ tools = [
                         "type": "string",
                         "description": "时区",
                         "enum": ["UTC", "local"]
-                    }
+                    },
                 }
             }
         }
@@ -436,6 +458,8 @@ async def main(input_message: str):
                         result = send_mail(args["text"], args["receiver"], args["subject"])
                     elif func_name == "R1_opt":
                         result = R1_opt(args["message"])
+                    elif func_name == "ssh":
+                        result = ssh(args["command"])
                     else:
                         raise ValueError(f"未定义的工具调用: {func_name}")
 
