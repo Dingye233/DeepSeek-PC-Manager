@@ -2,12 +2,12 @@ import paramiko
 import sys
 import time
 import re
-
+import getpass  # 用于隐藏密码输入
 
 def ssh_interactive_command(ip, username, password, initial_command):
     """
     连接到 SSH 并执行初始命令。
-    如果在命令执行过程中遇到需要二次输入的提示（例如包含英文提示"Are you sure"或类似的关键字），
+    如果在命令执行过程中遇到需要二次输入的提示（例如包含英文提示 "Are you sure" 或 sudo 密码提示），
     则提示用户输入响应，并继续发送到远程主机。
 
     最后返回命令执行结束后的所有输出。
@@ -41,11 +41,18 @@ def ssh_interactive_command(ip, username, password, initial_command):
                 print(output, end='')  # 实时反馈输出
                 timeout_counter = 0
 
-                # 检测输出中是否有提示需要用户二次输入
-                # 这里同时匹配中文提示和英文提示，例如：
-                # - 中文："请输入"、"确认"
-                # - 英文："Are you sure", "confirm", "[y/N]", "[Y/n]"
-                if re.search(r'(请输入|确认|Are you sure|confirm|\[y/?n\]|\[Y/?n\])', output, re.IGNORECASE):
+                # 检测是否出现 sudo 密码提示
+                if re.search(r'\[sudo\] password for', output):
+                    sudo_pw = getpass.getpass("检测到 sudo 提示，请输入 sudo 密码: ")
+                    shell.send(sudo_pw + "\n")
+                    time.sleep(1)
+                    if shell.recv_ready():
+                        resp_output = shell.recv(65535).decode('utf-8')
+                        all_output += resp_output
+                        print(resp_output, end='')
+
+                # 检测其他需要用户交互的提示（中英文提示）
+                elif re.search(r'(请输入|确认|Are you sure|confirm|\[y/?n\])', output, re.IGNORECASE):
                     user_response = input("检测到提示，请输入响应: ")
                     shell.send(user_response + "\n")
                     time.sleep(1)
@@ -53,6 +60,7 @@ def ssh_interactive_command(ip, username, password, initial_command):
                         resp_output = shell.recv(65535).decode('utf-8')
                         all_output += resp_output
                         print(resp_output, end='')
+
             else:
                 # 若连续3秒钟无输出，则认为命令执行完毕
                 timeout_counter += 1

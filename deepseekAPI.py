@@ -232,7 +232,7 @@ def ssh(command:str)->str:
     ip = "192.168.10.107"
     username = "ye"
     password = "147258"
-    ssh_controller.ssh_interactive_command(ip,username,password,command)
+    return ssh_controller.ssh_interactive_command(ip,username,password,command)
 # 3. 工具描述
 tools = [
     {
@@ -379,7 +379,7 @@ tools = [
         "type": "function",
         "function": {
             "name":"R1_opt",
-            "description":"当问题解决不了时调用更强大的r1深度思考模型来获取内容和答案给模型参考(返回的输出是string)",
+            "description":"此工具维护，停止使用",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -395,10 +395,14 @@ tools = [
 ]
 
 client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
-messages = [{"role": "system",
-             "content": "你叫小美你乐于助人，心地善良，活泼聪明，不要像个ai工具那样说话 "},
-            {"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "},
-            {"role": "system","content": " 这些是用户的一些关键信息，可能有用: "+user_information_read()}]
+# messages = [{"role": "system",
+#              "content": "你叫小美你乐于助人，心地善良，活泼聪明，不要像个ai工具那样说话 "},
+#             {"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "},
+#             {"role": "system","content": " 这些是用户的一些关键信息，可能有用: "+user_information_read()}]
+
+messages = [{"role": "system","content": " 你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: "+user_information_read()}]
+
+
 # check_model_message=[{"role": "system",
 #          "content": "你是任务审查模型，需要审查用户的任务是否被模型完成，如果没有完成则补充下一步该干什么，最后再让被审查模型继续执行"}]
 
