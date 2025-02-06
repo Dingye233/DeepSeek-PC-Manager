@@ -491,7 +491,7 @@ async def main(input_message: str):
                 response = client.chat.completions.create(
                     model="deepseek-chat",
                     messages=messages,
-                    temperature=1.3
+                    temperature=0.3
                 )
                 print("最终响应获取成功")
 

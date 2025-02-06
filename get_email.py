@@ -6,6 +6,7 @@ from typing import List, Dict, Optional
 import functools
 import threading
 from dotenv import load_dotenv
+import re
 
 
 class IMAPConnectionManager:
@@ -194,10 +195,13 @@ class EmailRetriever:
                 content_type = part.get_content_type()
                 content_disposition = str(part.get("Content-Disposition"))
 
-                # 提取正文
-                if content_type == "text/plain" and "attachment" not in content_disposition:
+                # 提取HTML格式的正文
+                if content_type == "text/html":
                     try:
-                        email_details['body'] = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                        html_content = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                        # 使用正则表达式过滤<style>标签及其内容
+                        filtered_html = re.sub(r'<style.*?</style>', '', html_content, flags=re.DOTALL)
+                        email_details['body'] = filtered_html
                     except Exception:
                         email_details['body'] = "无法解码正文内容"
 
