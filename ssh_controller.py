@@ -2,77 +2,79 @@ import paramiko
 import sys
 import time
 import re
-import getpass  # 用于隐藏密码输入
+
 
 def ssh_interactive_command(ip, username, password, initial_command):
-    """
-    连接到 SSH 并执行初始命令。
-    如果在命令执行过程中遇到需要二次输入的提示（例如包含英文提示 "Are you sure" 或 sudo 密码提示），
-    则提示用户输入响应，并继续发送到远程主机。
-
-    最后返回命令执行结束后的所有输出。
-    """
+    """改进版交互式SSH命令执行"""
     try:
-        # 创建 SSH 客户端并建立连接
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(ip, username=username, password=password)
+        client.connect(ip, username=username, password=password, timeout=10)
 
-        # 获取交互式 shell
+        # 创建交互式shell
         shell = client.invoke_shell()
-        time.sleep(1)  # 等待欢迎信息、提示符出现
+        shell.settimeout(5)  # 设置命令执行超时
 
-        # 清除初始缓冲区内容
-        if shell.recv_ready():
-            initial_output = shell.recv(65535).decode('utf-8')
-            print(initial_output, end='')
+        # 等待shell初始化
+        time.sleep(1)
+        _clear_buffer(shell)
 
         # 发送初始命令
         shell.send(initial_command + "\n")
-        all_output = ""
-        timeout_counter = 0  # 用于检测是否连续无输出
+        output = []
+        start_time = time.time()
+        timeout = 30  # 总超时时间
 
-        # 循环读取输出，直到认为命令执行完毕（连续一段时间无输出）
-        while True:
-            time.sleep(1)
+        while time.time() - start_time < timeout:
             if shell.recv_ready():
-                output = shell.recv(65535).decode('utf-8')
-                all_output += output
-                print(output, end='')  # 实时反馈输出
-                timeout_counter = 0
+                data = shell.recv(4096).decode('utf-8', errors='replace')
+                output.append(data)
+                print(data, end='', flush=True)  # 实时输出
 
-                # 检测是否出现 sudo 密码提示
-                if re.search(r'\[sudo\] password for', output):
-                    sudo_pw = getpass.getpass("检测到 sudo 提示，请输入 sudo 密码: ")
-                    shell.send(sudo_pw + "\n")
-                    time.sleep(1)
-                    if shell.recv_ready():
-                        resp_output = shell.recv(65535).decode('utf-8')
-                        all_output += resp_output
-                        print(resp_output, end='')
+                # 检测交互提示
+                if _need_user_input(data):
+                    response = _get_user_response(data)
+                    shell.send(response + "\n")
+                    start_time = time.time()  # 重置超时计时
 
-                # 检测其他需要用户交互的提示（中英文提示）
-                elif re.search(r'(请输入|确认|Are you sure|confirm|\[y/?n\])', output, re.IGNORECASE):
-                    user_response = input("检测到提示，请输入响应: ")
-                    shell.send(user_response + "\n")
-                    time.sleep(1)
-                    if shell.recv_ready():
-                        resp_output = shell.recv(65535).decode('utf-8')
-                        all_output += resp_output
-                        print(resp_output, end='')
+            elif shell.exit_status_ready():  # 命令已执行完成
+                break
 
-            else:
-                # 若连续3秒钟无输出，则认为命令执行完毕
-                timeout_counter += 1
-                if timeout_counter >= 3:
-                    break
+            time.sleep(0.1)
 
+        # 获取最终输出
+        final_output = ''.join(output).strip()
+        shell.close()
         client.close()
-        return all_output
+        
+        return final_output or "命令执行完成（无输出）"
 
     except Exception as e:
-        print(f"发生错误: {e}")
-        sys.exit(1)
+        return f"SSH错误: {str(e)}"
+
+def _need_user_input(data: str) -> bool:
+    """检测是否需要用户输入"""
+    patterns = [
+        r'password.*:',       # 密码提示
+        r'\[Y/n\]',           # 确认提示
+        r'\(yes/no\)',        # 确认提示
+        r'Enter selection',   # 选择提示
+        r'Please respond'     # 通用提示
+    ]
+    return any(re.search(p, data, re.I) for p in patterns)
+
+def _get_user_response(prompt: str) -> str:
+    """根据提示类型获取用户响应"""
+    if re.search(r'password', prompt, re.I):
+        return input("\n检测到需要密码，请输入后回车: ")
+    elif re.search(r'\[Y/n\]', prompt):
+        return input("\n需要确认 [Y/n]: ") or "y"
+    return input("\n需要输入响应: ")
+
+def _clear_buffer(shell):
+    """清空初始缓冲区"""
+    while shell.recv_ready():
+        shell.recv(1024)
 
 
 if __name__ == "__main__":
@@ -82,8 +84,8 @@ if __name__ == "__main__":
     password = "147258"
 
     # 大模型调用工具时，会指定一个初始命令
-    command = input("请输入初始命令: ")
+    command = input("请输入要执行的命令: ")
 
     output = ssh_interactive_command(ip, username, password, command)
-    print("\n最终命令输出如下：")
+    print("\n命令执行结果:")
     print(output)

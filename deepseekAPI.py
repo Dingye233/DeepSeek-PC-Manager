@@ -23,37 +23,27 @@ import send_email
 import ssh_controller
 from dotenv import load_dotenv
 from R1_optimize import r1_optimizer as R1
+import pyaudio
+import wave
+import uuid
+
 load_dotenv()
 # 1. TTS 功能实现
 async def text_to_speech(text: str, voice: str = "zh-CN-XiaoxiaoNeural"):
-    """
-    将文本转换为语音并播放
-    """
     try:
-        temp_file = None
-        try:
-            # 创建临时文件用于保存音频
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-            temp_file_path = temp_file.name
-            temp_file.close()
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+        temp_file_path = temp_file.name
+        temp_file.close()
 
-            # 使用 edge-tts 转换文本为语音
-            communicate = edge_tts.Communicate(text, voice)
-            await communicate.save(temp_file_path)
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(temp_file_path)
+        playsound(temp_file_path)
 
-            # 播放音频
-            playsound(temp_file_path)
-
-        finally:
-            # 确保在所有操作完成后删除临时文件
-            if temp_file and os.path.exists(temp_file_path):
-                try:
-                    os.unlink(temp_file_path)
-                except Exception as e:
-                    print(f"删除临时文件失败: {str(e)}")
-
+        if os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
     except Exception as e:
         print(f"TTS 错误: {str(e)}")
+
 def encoding(file_name:str,code:str)->str:
 
     return python_tools.encoding(code,file_name)
@@ -515,9 +505,14 @@ async def main(input_message: str):
                 print("========================\n")
                 return True
 
+        # 如果没有工具调用，直接添加模型的回复
         assistant_message = response.choices[0].message.content
         print("\n小美:", assistant_message)
         messages.append({"role": "assistant", "content": assistant_message})
+
+        # 调用 TTS 函数
+        await text_to_speech(assistant_message)
+
         return True
 
     except Exception as e:
@@ -526,6 +521,56 @@ async def main(input_message: str):
         print(f"错误信息: {str(e)}")
         print("========================\n")
         return True
+
+
+def recognize_speech() -> str:
+    url = "https://api.siliconflow.cn/v1/audio/transcriptions"
+    api_key = os.getenv("sttkey")
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        print("请开始说话...")
+        try:
+            audio = r.listen(source, timeout=5, phrase_time_limit=10)
+            print("录音结束，正在识别...")
+        except sr.WaitTimeoutError:
+            print("超时未检测到语音输入")
+            return ""
+
+    temp_file = f"temp_audio_{uuid.uuid4().hex}.wav"  # 使用唯一文件名
+    try:
+        with open(temp_file, "wb") as f:
+            f.write(audio.get_wav_data())
+
+        with open(temp_file, 'rb') as f:
+            files = {'file': (temp_file, f)}
+            payload = {
+                "model": "FunAudioLLM/SenseVoiceSmall",
+                "response_format": "transcript"
+            }
+            response = requests.post(url, headers=headers, data=payload, files=files)
+            response.raise_for_status()
+            result = response.json()
+            text = result['text']
+            print(f"语音识别结果: {text}")
+            return text
+    except requests.exceptions.RequestException as e:
+        print(f"请求错误: {e}")
+        return ""
+    except (KeyError, TypeError, ValueError) as e:
+        print(f"响应格式错误: {e}")
+        return ""
+    finally:
+        # 延迟删除，或者在下一次循环开始时删除
+        try:
+            os.remove(temp_file)
+        except OSError as e:
+            print(f"删除临时文件失败: {e}")
+
+    return ""
 
 
 if __name__ == "__main__":
@@ -537,8 +582,21 @@ if __name__ == "__main__":
     print("程序启动成功")
     while True:
         try:
-            user_message = input("\n输入消息: ")
-            should_continue = asyncio.run(main(user_message))
+            print("\n请选择输入方式:")
+            print("1. 文本输入")
+            print("2. 语音输入")
+            choice = input("输入选项(1或2): ").strip()
+            
+            if choice == '1':
+                input_message = input("\n输入消息: ")
+            elif choice == '2':
+                input_message = recognize_speech()
+            else:
+                print("无效的选项,请重新输入")
+                continue
+            
+            if input_message:
+                should_continue = asyncio.run(main(input_message))
             if not should_continue:
                 break
         except KeyboardInterrupt:
