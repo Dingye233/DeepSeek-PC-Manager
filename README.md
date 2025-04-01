@@ -5,10 +5,12 @@
 ## 功能模块
 
 ### 核心功能
-- **文本对话**：与大语言模型实时交互 (`deepseekAPI.py`)
-- **语音识别与合成**：支持语音输入和输出 (`aaaa.py`)
-- **自主任务规划**：AI自动分解复杂任务并执行 (`deepseekAPI.py`)
-- **错误处理与修复**：自动检测执行错误并尝试修复 (`deepseekAPI.py`)
+- **文本对话**：与大语言模型实时交互
+- **语音识别与合成**：支持语音输入和输出（仅完整版本）
+- **自主任务规划**：AI自动分解复杂任务并执行
+- **错误处理与修复**：自动检测执行错误并尝试修复
+- **上下文理解**：保持对话上下文连续性
+- **Web界面**：现代化网页界面，支持Markdown显示和代码高亮
 
 ### 工具集成
 - **文件操作**：创建、读取、修改文件 (`code_generator.py`)
@@ -39,6 +41,88 @@ python deepseekAPI.py
 ```bash
 python aaaa.py
 ```
+或双击`start_voice_mode.bat`
+
+### 交互方式
+- **Web界面**: 支持Markdown显示和代码高亮，最佳用户体验
+- **基础版本**: 仅支持文字输入/输出
+- **完整版本**: 支持语音输入(连续1.5秒静音自动结束)和语音输出(自动将回复转为语音)
+
+## 代码工具功能
+
+本项目集成了代码生成和管理工具，无需使用PowerShell命令即可操作代码文件：
+
+### 可用工具
+
+1. **write_code** - 将代码写入文件
+   ```python
+   {
+     "file_name": "example.py",  # 文件路径和名称
+     "code": "print('Hello World')"  # 代码内容
+   }
+   ```
+
+2. **verify_code** - 验证Python代码语法
+   ```python
+   {
+     "code": "def example(): return 42"  # 要验证的Python代码
+   }
+   ```
+
+3. **append_code** - 向文件追加代码
+   ```python
+   {
+     "file_name": "example.py",  # 要追加的文件
+     "content": "\ndef new_function():\n    pass"  # 要追加的内容
+   }
+   ```
+
+4. **read_code** - 读取文件内容
+   ```python
+   {
+     "file_name": "example.py"  # 要读取的文件
+   }
+   ```
+
+5. **create_module** - 创建Python模块
+   ```python
+   {
+     "module_name": "utils",  # 模块名称（不含.py）
+     "functions_json": '[{"name": "add", "params": "a, b", "body": "return a + b", "docstring": "Add two numbers"}]'  # 函数定义JSON
+   }
+   ```
+
+### 代码工具示例
+
+可以运行代码生成器示例：
+```bash
+python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'print(\"Hello, AI generated World!\")\n'))"
+```
+或双击`code_generator_demo.bat`
+
+## 常见问题
+
+1. **PyAudio安装失败**：
+   - Windows: 下载预编译wheel文件安装
+   - Linux: 安装系统依赖 `sudo apt-get install python3-pyaudio portaudio19-dev`
+   - macOS: 使用Homebrew安装 `brew install portaudio`
+
+2. **API密钥配置**：
+   - 确保.env文件中的API密钥已正确配置
+   - DeepSeek API密钥需要在[DeepSeek官网](https://platform.deepseek.com/)申请
+
+3. **语音功能不工作**：
+   - 检查麦克风和扬声器设置
+   - 确保pyaudio和edge-tts正确安装
+   - 语音识别需要网络连接
+
+4. **依赖安装问题**：
+   - 尝试使用国内镜像源: `pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
+
+5. **Web界面无法启动**：
+   - 确保已安装Flask和其他Web相关依赖
+   - 检查端口5000是否被其他应用占用
+   - 如果端口被占用，修改`web_ui.py`中的端口号
 
 ## 项目结构
 
