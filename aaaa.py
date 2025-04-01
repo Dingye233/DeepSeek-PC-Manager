@@ -1254,27 +1254,12 @@ if __name__ == "__main__":
             print(f"语音合成播放失败: {str(e)}")
             
     print("程序启动成功")
-    print("请选择输入模式:")
-    print("1. 语音模式（默认）")
-    print("2. 文本输入模式")
     
-    mode_choice = input("请选择 (1/2): ")
-    use_voice_mode = mode_choice != "2"
-    
-    if use_voice_mode:
-        print("已选择语音模式，您可以通过语音输入与AI交流")
-    else:
-        print("已选择文本输入模式，您可以通过键盘输入与AI交流")
     
     while True:
         try:
-            if use_voice_mode:
+            
                 user_message = recognize_speech()
-            else:
-                print("\n请输入您的问题 (输入 'quit' 退出):")
-                user_message = input("> ")
-                
-            if user_message:
                 should_continue = asyncio.run(main(user_message))
                 if not should_continue:
                     break
