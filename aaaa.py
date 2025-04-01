@@ -61,8 +61,7 @@ def tts(text:str):
         except:
             pass
     except Exception as e:
-        print(f"TTS合成或播放失败: {str(e)}")
-        traceback.print_exc()
+        print(f"TTS错误: {str(e)}")
 
 
 async def text_to_speech(text: str):
@@ -121,8 +120,7 @@ def generate_welcome_audio():
             asyncio.run(communicate.save("welcome.mp3"))
             print("使用备选方法生成欢迎语音")
     except Exception as e:
-        print(f"生成欢迎语音完全失败: {str(e)}")
-        traceback.print_exc()
+        print(f"生成欢迎语音失败: {str(e)}")
 
 
 def encoding(file_name: str, code: str) -> str:
@@ -816,7 +814,7 @@ async def execute_task_with_planning(user_input, messages_history):
                                     result = ssh(args["command"])
                                 elif func_name == "clear_context":
                                     result = "上下文已清除"
-                                    current_execution_messages = clear_context(current_execution_messages)
+                                    current_execution_messages = handle_clear_context(current_execution_messages)
                                 elif func_name == "write_code":
                                     result = code_tools.write_code(args["file_name"], args["code"])
                                 elif func_name == "verify_code":
@@ -1092,9 +1090,29 @@ def clear_context(messages: list) -> list:
     :param messages: 当前的对话历史
     :return: 清空后的对话历史，只保留系统消息
     """
-    # 保留系统消息，清除其他消息
-    system_message = next((msg for msg in messages if msg["role"] == "system"), None)
-    return [system_message] if system_message else []
+    # 仅保留系统消息，彻底清除其他所有消息包括工具调用
+    system_messages = [msg for msg in messages if msg["role"] == "system"]
+    
+    # 如果没有系统消息，添加一个默认的系统消息
+    if not system_messages:
+        user_info = user_information_read()
+        system_messages = [{"role": "system", "content": f"你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: {user_info}"}]
+    
+    # 添加一个标记，表示上下文已清空
+    print("上下文已清除，只保留系统消息")
+    return system_messages
+
+
+# 专门处理clear_context工具调用的函数
+def handle_clear_context(current_messages):
+    """
+    处理clear_context工具调用，生成一个完全新的消息列表而不是修改现有的
+    """
+    # 获取清除后的系统消息
+    system_messages = clear_context(current_messages)
+    
+    # 创建新的完全干净的消息列表
+    return system_messages.copy()
 
 
 async def main(input_message: str):
@@ -1105,9 +1123,9 @@ async def main(input_message: str):
 
     # 检查是否是清除上下文的命令
     if input_message.lower() in ["清除上下文", "清空上下文", "clear context", "reset context"]:
-        messages = clear_context(messages)
-        print("上下文已清除")
-        return "上下文已清除，您可以开始新的对话了。"
+        messages = handle_clear_context(messages)
+        await text_to_speech("上下文已清除，您可以开始新的对话了")
+        return True
         
     # 先尝试常规对话，检查是否需要调用工具
     messages.append({"role": "user", "content": input_message})
@@ -1166,7 +1184,7 @@ async def main(input_message: str):
 # 替代输入函数，从Web前端获取用户输入
 async def get_web_console_input(prompt: str, default_value: str = None) -> str:
     """
-    获取用户输入，默认使用语音输入
+    获取用户输入，仅使用语音输入
     :param prompt: 提示信息
     :param default_value: 默认值
     :return: 用户输入的文本
@@ -1179,24 +1197,30 @@ async def get_web_console_input(prompt: str, default_value: str = None) -> str:
     # 播放语音提示
     await text_to_speech(prompt)
     
-    # 直接使用语音输入
-    print("请开始语音输入...")
-    user_input = recognize_speech()
-    if user_input:
-        print(f"语音识别结果: {user_input}")
-        return user_input
-    else:
-        print("未能识别语音输入，切换到文本输入")
-        user_input = input("请输入: ")
-        if not user_input and default_value:
-            return default_value
-        return user_input
+    # 使用语音输入，最多尝试3次
+    for attempt in range(3):
+        print(f"请开始语音输入... (尝试 {attempt+1}/3)")
+        user_input = recognize_speech()
+        
+        if user_input:
+            print(f"语音识别结果: {user_input}")
+            return user_input
+        
+        print(f"未能识别语音输入，再试一次...")
+    
+    # 3次都失败后，使用默认值或者紧急情况下允许文本输入
+    print("多次语音识别失败，使用默认值或允许文本输入")
+    
+    # 只有当没有默认值时才允许文本输入
+    if not default_value:
+        return input("紧急情况下允许文本输入，请输入: ")
+    return default_value
 
 
 # 替代确认函数，从Web前端获取用户确认
 async def get_web_console_confirm(prompt: str, confirm_text: str = "确认", cancel_text: str = "取消") -> bool:
     """
-    获取用户确认，默认使用语音输入
+    获取用户确认，仅使用语音输入
     :param prompt: 提示信息
     :param confirm_text: 确认按钮文本
     :param cancel_text: 取消按钮文本
@@ -1209,31 +1233,33 @@ async def get_web_console_confirm(prompt: str, confirm_text: str = "确认", can
     # 播放语音提示
     await text_to_speech(prompt)
     
-    # 直接使用语音输入
-    print("请开始语音输入...")
-    user_input = recognize_speech()
-    if user_input:
-        print(f"语音识别结果: {user_input}")
-        # 分析语音结果中的确认意图
-        if any(word in user_input.lower() for word in ["确认", "同意", "是", "好", "可以", "yes", "确定", confirm_text.lower()]):
-            return True
-        elif any(word in user_input.lower() for word in ["取消", "否", "不", "no", "不要", cancel_text.lower()]):
-            return False
+    # 使用语音输入，最多尝试3次
+    for attempt in range(3):
+        print(f"请开始语音输入... (尝试 {attempt+1}/3)")
+        user_input = recognize_speech()
+        
+        if user_input:
+            print(f"语音识别结果: {user_input}")
+            # 分析语音结果中的确认意图
+            if any(word in user_input.lower() for word in ["确认", "同意", "是", "好", "可以", "yes", "确定", "1", confirm_text.lower()]):
+                return True
+            elif any(word in user_input.lower() for word in ["取消", "否", "不", "no", "不要", "2", cancel_text.lower()]):
+                return False
+            else:
+                print("无法确定您的选择，请更清晰地说出您的选择")
         else:
-            # 如果无法确定意图，要求用户使用文本明确选择
-            print("无法确定您的选择，请明确回答")
-            user_choice = input(f"请选择 (1. {confirm_text} / 2. {cancel_text}): ")
-            return user_choice.strip() == "1"
-    else:
-        print("未能识别语音输入，切换到文本输入")
-        user_choice = input(f"请选择 (1. {confirm_text} / 2. {cancel_text}): ")
-        return user_choice.strip() == "1"
+            print(f"未能识别语音输入，再试一次...")
+    
+    # 3次都失败后，默认取消或紧急情况下允许文本输入
+    print("多次语音识别失败，允许文本输入")
+    user_choice = input(f"紧急情况下允许文本输入，请选择 (1. {confirm_text} / 2. {cancel_text}): ")
+    return user_choice.strip() == "1"
 
 
 # 替代选择函数，从Web前端获取用户选择
 async def get_web_console_select(prompt: str, options: list) -> dict:
     """
-    获取用户从多个选项中的选择，默认使用语音输入
+    获取用户从多个选项中的选择，仅使用语音输入
     :param prompt: 提示信息
     :param options: 选项列表
     :return: 选中的选项
@@ -1247,40 +1273,33 @@ async def get_web_console_select(prompt: str, options: list) -> dict:
     # 播放语音提示
     await text_to_speech(f"{prompt}，请选择1到{len(options)}之间的选项")
     
-    # 直接使用语音输入
-    print("请开始语音输入...")
-    user_input = recognize_speech()
-    if user_input:
-        print(f"语音识别结果: {user_input}")
-        # 尝试从语音中提取数字
-        for i, option in enumerate(options, 1):
-            if str(i) in user_input or option.get("text", "") in user_input:
-                return options[i-1]
+    # 使用语音输入，最多尝试3次
+    for attempt in range(3):
+        print(f"请开始语音输入... (尝试 {attempt+1}/3)")
+        user_input = recognize_speech()
         
-        # 如果无法从语音中提取，要求用户使用文本明确选择
-        print("无法确定您的选择，切换到文本输入")
-        try:
-            user_choice = int(input(f"请输入数字 (1-{len(options)}): "))
-            if 1 <= user_choice <= len(options):
-                return options[user_choice-1]
-            else:
-                print("无效的选择，使用第一个选项")
-                return options[0]
-        except ValueError:
-            print("无效的输入，使用第一个选项")
-            return options[0]
-    else:
-        print("未能识别语音输入，切换到文本输入")
-        try:
-            user_choice = int(input(f"请输入数字 (1-{len(options)}): "))
-            if 1 <= user_choice <= len(options):
-                return options[user_choice-1]
-            else:
-                print("无效的选择，使用第一个选项")
-                return options[0]
-        except ValueError:
-            print("无效的输入，使用第一个选项")
-            return options[0]
+        if user_input:
+            print(f"语音识别结果: {user_input}")
+            # 尝试从语音中提取数字
+            for i, option in enumerate(options, 1):
+                if str(i) in user_input or option.get("text", "") in user_input:
+                    return options[i-1]
+            
+            print("无法从语音中识别选项，请更清晰地说出选项编号")
+        else:
+            print(f"未能识别语音输入，再试一次...")
+    
+    # 3次都失败后，默认选第一个或紧急情况下允许文本输入
+    print("多次语音识别失败，允许文本输入")
+    try:
+        user_choice = int(input(f"紧急情况下允许文本输入，请输入数字 (1-{len(options)}): "))
+        if 1 <= user_choice <= len(options):
+            return options[user_choice-1]
+    except ValueError:
+        pass
+    
+    print("使用第一个选项作为默认值")
+    return options[0]
 
 
 # 语音识别函数
@@ -1292,6 +1311,12 @@ def recognize_speech() -> str:
     try:
         url = "https://api.siliconflow.cn/v1/audio/transcriptions"
         api_key = os.getenv("sttkey")
+        
+        # 如果API密钥为空，尝试使用备用密钥
+        if not api_key:
+            print("警告：API密钥未设置，请检查环境变量")
+            api_key = os.getenv("gjldkey")
+            
         headers = {
             "Authorization": f"Bearer {api_key}"
         }
@@ -1331,9 +1356,10 @@ def recognize_speech() -> str:
             print(f"语音识别响应格式错误: {e}")
             return ""
         finally:
-            # 延迟删除，或者在下一次循环开始时删除
+            # 删除临时文件
             try:
-                os.remove(temp_file)
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
             except OSError as e:
                 print(f"删除临时文件失败: {e}")
     except Exception as e:
@@ -1362,24 +1388,20 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-    print("语音增强版AI助手已启动，默认使用语音交互")
+    print("语音增强版AI助手已启动，仅使用语音交互")
     while True:
         try:
             print("\n等待语音输入中...")
             input_message = recognize_speech()
             
             if not input_message:
-                print("未能识别语音输入，请使用文本输入")
-                input_message = input("输入消息: ")
-                if not input_message:
-                    continue
-            else:
-                print(f"语音识别结果: {input_message}")
+                print("未能识别语音输入，请重新尝试...")
+                continue
             
-            if input_message:
-                should_continue = asyncio.run(main(input_message))
-                if not should_continue:
-                    break
+            print(f"语音识别结果: {input_message}")
+            should_continue = asyncio.run(main(input_message))
+            if not should_continue:
+                break
         except KeyboardInterrupt:
             print("\n程序已被用户中断")
             break
