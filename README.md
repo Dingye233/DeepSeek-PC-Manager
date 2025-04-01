@@ -1,6 +1,6 @@
 # 基于大语言模型的智能助手
 
-这是一个基于DeepSeek大语言模型的个人智能助手系统，提供多种功能，包括文本交互、语音识别与合成、代码生成、邮件管理、天气查询等。系统支持两种运行模式：基础文本模式和完整语音模式。
+这是一个基于DeepSeek大语言模型的个人智能助手系统，提供多种功能，包括文本交互、语音识别与合成、代码生成、邮件管理、天气查询等。系统支持两种运行模式：基础文本模式和完整语音模式，以及现代化的Web界面。
 
 ## 功能特点
 
@@ -10,6 +10,7 @@
 - **自主任务规划**：AI自动分解复杂任务并执行
 - **错误处理与修复**：自动检测执行错误并尝试修复
 - **上下文理解**：保持对话上下文连续性
+- **Web界面**：现代化网页界面，支持Markdown显示和代码高亮
 
 ### 工具集成
 - **文件操作**：创建、读取、修改文件
@@ -112,6 +113,15 @@ python auto_setup.py
 
 ## 使用方法
 
+### Web界面（推荐）
+运行Web界面版本:
+```bash
+python web_ui.py
+```
+或双击`run_web.bat`
+
+Web界面将在 http://127.0.0.1:5000 启动，您可以通过浏览器访问。
+
 ### 基础版本 (无语音功能)
 运行基础版本:
 ```bash
@@ -127,6 +137,7 @@ python aaaa.py
 或双击`start_voice_mode.bat`
 
 ### 交互方式
+- **Web界面**: 支持Markdown显示和代码高亮，最佳用户体验
 - **基础版本**: 仅支持文字输入/输出
 - **完整版本**: 支持语音输入(连续1.5秒静音自动结束)和语音输出(自动将回复转为语音)
 
@@ -201,6 +212,11 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 4. **依赖安装问题**：
    - 尝试使用国内镜像源: `pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
 
+5. **Web界面无法启动**：
+   - 确保已安装Flask和其他Web相关依赖
+   - 检查端口5000是否被其他应用占用
+   - 如果端口被占用，修改`web_ui.py`中的端口号
+
 ## 项目结构
 
 ```
@@ -210,15 +226,25 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 ├── auto_setup.py           # 自动安装配置脚本
 ├── aaaa.py                 # 完整版本(含语音功能)
 ├── deepseekAPI.py          # 基础版本(仅文本功能)
+├── web_ui.py               # Web界面版本
 ├── code_generator.py       # 代码生成核心功能
 ├── code_tools.py           # 代码工具接口层
+├── console_ui.py           # 控制台界面美化
 ├── python_tools.py         # Python辅助工具
 ├── get_email.py            # 邮件获取功能
 ├── send_email.py           # 邮件发送功能
 ├── ssh_controller.py       # SSH远程控制
 ├── user_information.txt    # 用户信息配置(可选)
+├── static/                 # Web静态资源
+│   ├── css/
+│   │   └── style.css       # Web界面样式
+│   └── js/
+│       └── main.js         # Web界面交互脚本
+├── templates/              # Web模板文件
+│   └── index.html          # Web主页
 ├── start_text_mode.bat     # 基础版本启动脚本
 ├── start_voice_mode.bat    # 完整版本启动脚本
+├── run_web.bat             # Web界面启动脚本
 └── code_generator_demo.bat # 代码工具示例脚本
 ```
 
