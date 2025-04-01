@@ -26,6 +26,7 @@ import pyaudio
 import wave
 import uuid
 from tts_http_demo import tts_volcano
+import code_tools  # 导入新的代码工具模块
 
 load_dotenv()
 
@@ -448,6 +449,103 @@ tools = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_code",
+            "description": "将代码写入指定文件，支持所有编程语言",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_name": {
+                        "type": "string",
+                        "description": "文件名，包括路径和扩展名，例如 'app.py' 或 'src/utils.js'"
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "要写入文件的代码内容"
+                    }
+                },
+                "required": ["file_name", "code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "verify_code",
+            "description": "验证Python代码的语法是否正确",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "要验证的Python代码"
+                    }
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "append_code",
+            "description": "向现有文件追加代码内容",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_name": {
+                        "type": "string",
+                        "description": "文件名，包括路径和扩展名"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "要追加的代码内容"
+                    }
+                },
+                "required": ["file_name", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_code",
+            "description": "读取代码文件内容",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_name": {
+                        "type": "string",
+                        "description": "文件名，包括路径和扩展名"
+                    }
+                },
+                "required": ["file_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_module",
+            "description": "创建包含多个函数的Python模块",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "module_name": {
+                        "type": "string",
+                        "description": "模块名称(不含.py)"
+                    },
+                    "functions_json": {
+                        "type": "string",
+                        "description": "函数定义的JSON字符串数组，每个函数包含name、params、body和docstring"
+                    }
+                },
+                "required": ["module_name", "functions_json"]
+            }
+        }
+    },
 ]
 
 messages = [{"role": "system",
@@ -459,6 +557,431 @@ messages = [{"role": "system",
                         "5.请完全遵守以上要求"
                         "这些是爸爸的一些信息，可能有用: " + user_information_read()}]
 
+# 添加任务规划和错误修复
+task_planning_system_message = {
+    "role": "system",
+    "content": """你现在是一个自主规划任务的智能体，请遵循以下原则：
+1. 接收到任务后，首先分析任务需求并制定执行计划
+2. 将复杂任务分解为可执行的子任务步骤
+3. 执行每个步骤并观察结果
+4. 如果执行过程中遇到错误或异常，分析错误原因并重新规划解决方案
+5. 持续尝试不同方法直到任务成功完成或确定无法完成
+6. 任务完成后总结执行过程和结果
+
+执行方式：
+- 对于复杂任务，独立思考并自主规划解决方案
+- 根据用户输入或环境反馈调整计划
+- 使用工具执行具体操作（如执行命令、创建文件等）
+- 遇到错误时分析错误信息并自动修正
+- 使用循环方式验证任务是否完成，直到成功或确认失败
+
+关键能力：
+- 任务分解与规划能力
+- 错误检测与自动修复
+- 持续尝试与备选方案
+- 结果验证与确认
+"""
+}
+
+# 添加错误处理和重试机制的函数
+def parse_error_message(error_message):
+    """
+    解析错误信息，提取关键信息
+    """
+    # 常见错误类型及其解决方案
+    error_patterns = {
+        r'ModuleNotFoundError: No module named [\'\"]?(\w+)[\'\"]?': "缺少依赖模块 {}，需要安装",
+        r'ImportError: (\w+)': "导入模块 {} 失败，检查模块名称是否正确",
+        r'SyntaxError: (.+)': "代码语法错误: {}，需要修复",
+        r'NameError: name [\'\"]?(\w+)[\'\"]? is not defined': "变量 {} 未定义",
+        r'AttributeError: [\'\"]?(\w+)[\'\"]?': "属性或方法 {} 不存在",
+        r'TypeError: (.+)': "类型错误: {}",
+        r'ValueError: (.+)': "值错误: {}",
+        r'PermissionError: (.+)': "权限错误: {}，可能需要管理员权限",
+        r'FileNotFoundError: (.+)': "文件未找到: {}",
+        r'ConnectionError: (.+)': "连接错误: {}，检查网络连接",
+        r'Timeout': "操作超时，可能需要延长等待时间或检查连接",
+    }
+    
+    for pattern, solution_template in error_patterns.items():
+        match = re.search(pattern, error_message)
+        if match:
+            return solution_template.format(match.group(1))
+    
+    return "未能识别的错误: " + error_message
+
+def task_error_analysis(result, task_context):
+    """
+    分析工具执行结果中的错误，生成修复建议
+    """
+    if "错误" in result or "Error" in result or "exception" in result.lower() or "failed" in result.lower():
+        error_analysis = parse_error_message(result)
+        return {
+            "has_error": True,
+            "error_message": result,
+            "analysis": error_analysis,
+            "context": task_context
+        }
+    return {"has_error": False}
+
+async def execute_task_with_planning(user_input, messages_history):
+    """
+    使用任务规划执行用户请求
+    """
+    # 添加任务规划系统消息
+    planning_messages = messages_history.copy()
+    
+    # 替换或添加任务规划系统消息
+    system_message_index = next((i for i, msg in enumerate(planning_messages) if msg["role"] == "system"), None)
+    if system_message_index is not None:
+        combined_content = planning_messages[system_message_index]["content"] + "\n\n" + task_planning_system_message["content"]
+        planning_messages[system_message_index]["content"] = combined_content
+    else:
+        planning_messages.insert(0, task_planning_system_message)
+    
+    # 添加用户输入
+    planning_messages.append({"role": "user", "content": f"请完成以下任务，并详细规划执行步骤：{user_input}"})
+    
+    # 获取任务规划
+    try:
+        planning_response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=planning_messages,
+            temperature=0.3
+        )
+        
+        task_plan = planning_response.choices[0].message.content
+        print("\n===== 任务规划 =====")
+        print(task_plan)
+        print("====================\n")
+        
+        # 添加任务规划到对话历史
+        planning_messages.append({"role": "assistant", "content": task_plan})
+        
+        # 执行任务（最多尝试5次）
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            try:
+                # 添加执行提示
+                execution_prompt = f"现在开始执行任务计划的第{attempt+1}次尝试。请调用适当的工具执行计划中的步骤。"
+                if attempt > 0:
+                    execution_prompt += f" 这是第{attempt+1}次尝试，前面{attempt}次尝试失败。请根据之前的错误调整策略。"
+                
+                planning_messages.append({"role": "user", "content": execution_prompt})
+                
+                # 初始化递归验证
+                recursive_verify_count = 0
+                max_recursive_verify = 10  # 最大递归验证次数
+                is_task_complete = False
+                current_execution_messages = planning_messages.copy()
+                
+                # 内部递归验证循环
+                while recursive_verify_count < max_recursive_verify and not is_task_complete:
+                    recursive_verify_count += 1
+                    print(f"\n===== 任务执行迭代 {recursive_verify_count}/{max_recursive_verify} =====")
+                    
+                    # 调用API执行任务步骤
+                    execution_response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=current_execution_messages,
+                        tools=tools,
+                        tool_choice="auto",
+                        temperature=0.3
+                    )
+                    
+                    message_data = execution_response.choices[0].message
+                    
+                    # 处理工具调用
+                    if hasattr(message_data, 'tool_calls') and message_data.tool_calls:
+                        # 执行工具调用并收集结果
+                        tool_calls = message_data.tool_calls
+                        tool_outputs = []
+                        step_success = True
+                        
+                        # 添加助手消息和工具调用
+                        current_execution_messages.append({
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments
+                                    }
+                                } for tc in tool_calls
+                            ]
+                        })
+                        
+                        for tool_call in tool_calls:
+                            func_name = tool_call.function.name
+                            args = json.loads(tool_call.function.arguments)
+                            print(f"\n正在执行工具: {func_name}")
+                            print(f"参数: {args}")
+                            
+                            try:
+                                # 执行工具函数
+                                if func_name == "get_current_time":
+                                    result = get_current_time(args.get("timezone", "UTC"))
+                                elif func_name == "get_weather":
+                                    result = get_weather(args["city"])
+                                elif func_name == "powershell_command":
+                                    result = await powershell_command(args["command"])
+                                elif func_name == "email_check":
+                                    result = email_check()
+                                elif func_name == "email_details":
+                                    result = email_details(args["email_id"])
+                                elif func_name == "encoding":
+                                    result = encoding(args["file_name"], args["code"])
+                                elif func_name == "send_mail":
+                                    result = send_mail(args["text"], args["receiver"], args["subject"])
+                                elif func_name == "R1_opt":
+                                    result = R1_opt(args["message"])
+                                elif func_name == "ssh":
+                                    result = ssh(args["command"])
+                                elif func_name == "clear_context":
+                                    result = "上下文已清除"
+                                    current_execution_messages = clear_context(current_execution_messages)
+                                elif func_name == "write_code":
+                                    result = code_tools.write_code(args["file_name"], args["code"])
+                                elif func_name == "verify_code":
+                                    result = code_tools.verify_code(args["code"])
+                                elif func_name == "append_code":
+                                    result = code_tools.append_code(args["file_name"], args["content"])
+                                elif func_name == "read_code":
+                                    result = code_tools.read_code(args["file_name"])
+                                elif func_name == "create_module":
+                                    result = code_tools.create_module(args["module_name"], args["functions_json"])
+                                else:
+                                    raise ValueError(f"未定义的工具调用: {func_name}")
+                                
+                                print(f"工具执行结果: {result}")
+                                
+                                # 分析执行结果是否有错误
+                                error_info = task_error_analysis(result, {"tool": func_name, "args": args})
+                                if error_info["has_error"]:
+                                    print(f"\n检测到错误: {error_info['analysis']}")
+                                    step_success = False
+                                    
+                                    # 将错误信息添加到结果中
+                                    result = f"{result}\n\n分析: {error_info['analysis']}"
+                                
+                            except Exception as e:
+                                error_msg = f"工具执行失败: {str(e)}"
+                                print(f"\n===== 工具执行错误 =====")
+                                print(f"工具名称: {func_name}")
+                                print(f"错误类型: {type(e)}")
+                                print(f"错误信息: {str(e)}")
+                                print("========================\n")
+                                result = error_msg
+                                step_success = False
+                            
+                            # 添加工具结果到消息历史
+                            current_execution_messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": str(result)
+                            })
+                            
+                            tool_outputs.append({
+                                "tool_call_id": tool_call.id,
+                                "output": str(result)
+                            })
+                        
+                        # 验证当前步骤执行后，任务是否完成
+                        verify_prompt = """
+                        基于目前的执行情况，请分析当前任务的完成状态:
+                        1. 任务是否已完全完成？如果完成，请详细说明完成的内容和结果。
+                        2. 如果任务未完成，还需要执行哪些步骤？
+                        3. 是否存在无法克服的障碍使任务无法继续？
+                        
+                        请严格按照以下格式回复:
+                        {
+                            "is_complete": true/false,  // 任务是否完成
+                            "completion_status": "简短描述任务状态",
+                            "next_steps": "若任务未完成，下一步需要执行的操作",
+                            "is_failed": true/false,  // 任务是否已失败且无法继续
+                            "failure_reason": "若已失败，失败的原因"
+                        }
+                        """
+                        
+                        current_execution_messages.append({"role": "user", "content": verify_prompt})
+                        
+                        # 调用验证
+                        verify_response = client.chat.completions.create(
+                            model="deepseek-chat",
+                            messages=current_execution_messages,
+                            temperature=0.1
+                        )
+                        
+                        verify_result = verify_response.choices[0].message.content
+                        print("\n===== 任务验证结果 =====")
+                        print(verify_result)
+                        print("=========================\n")
+                        
+                        # 解析验证结果
+                        try:
+                            # 尝试提取JSON部分
+                            json_match = re.search(r'({.*})', verify_result, re.DOTALL)
+                            if json_match:
+                                verify_json = json.loads(json_match.group(1))
+                            else:
+                                # 如果没有明确的JSON，尝试更灵活的解析
+                                verify_json = {
+                                    "is_complete": "true" in verify_result.lower() and "完成" in verify_result,
+                                    "is_failed": "失败" in verify_result or "无法继续" in verify_result,
+                                    "completion_status": verify_result[:100] + "..."  # 简短摘要
+                                }
+                            
+                            # 添加验证结果到消息历史
+                            current_execution_messages.append({"role": "assistant", "content": verify_result})
+                            
+                            # 检查任务是否完成或失败
+                            if verify_json.get("is_complete", False) is True:
+                                is_task_complete = True
+                                print("\n✅ 任务已完成! 准备生成总结...")
+                                break
+                            
+                            if verify_json.get("is_failed", False) is True:
+                                print(f"\n❌ 任务无法继续: {verify_json.get('failure_reason', '未知原因')}")
+                                break
+                            
+                            # 如果任务未完成也未失败，继续下一步
+                            next_step = verify_json.get("next_steps", "请继续执行任务的下一步骤")
+                            current_execution_messages.append({
+                                "role": "user", 
+                                "content": f"任务尚未完成。现在请执行下一步: {next_step}"
+                            })
+                            
+                        except (json.JSONDecodeError, ValueError) as e:
+                            print(f"验证结果解析失败: {str(e)}")
+                            # 如果解析失败，简单继续
+                            current_execution_messages.append({
+                                "role": "user", 
+                                "content": "请继续执行任务的下一步骤。"
+                            })
+                    else:
+                        # 没有工具调用，可能是任务结束或需要进一步指导
+                        content = message_data.content
+                        current_execution_messages.append({"role": "assistant", "content": content})
+                        
+                        # 检查是否包含完成信息
+                        if "任务已完成" in content or "任务完成" in content:
+                            is_task_complete = True
+                            print("\n✅ 任务已完成! 准备生成总结...")
+                            break
+                        
+                        # 如果模型未调用工具但也未完成，提示继续
+                        if recursive_verify_count < max_recursive_verify:
+                            current_execution_messages.append({
+                                "role": "user", 
+                                "content": "请继续执行任务，如果需要，请调用相应的工具。"
+                            })
+                
+                # 内部递归结束后，更新外部消息历史
+                planning_messages = current_execution_messages.copy()
+                
+                # 检查任务是否在递归内完成
+                if is_task_complete:
+                    # 任务成功，获取总结回复
+                    planning_messages.append({
+                        "role": "user", 
+                        "content": "任务执行完成，请简洁总结执行结果（不超过100字）。使用简短句子，避免复杂解释。"
+                    })
+                    
+                    final_response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=planning_messages,
+                        temperature=0.2,
+                        max_tokens=150  # 限制token数量
+                    )
+                    
+                    summary = final_response.choices[0].message.content
+                    print("\n===== 任务执行总结 =====")
+                    print(summary)
+                    print("========================\n")
+                    
+                    # 添加到主对话历史
+                    messages_history.append({"role": "user", "content": user_input})
+                    messages_history.append({"role": "assistant", "content": summary})
+                    
+                    # 播放结果语音
+                    await text_to_speech(summary)
+                    
+                    return True, summary
+                else:
+                    # 任务在内部递归中未完成，添加错误反馈
+                    if recursive_verify_count >= max_recursive_verify:
+                        iteration_error = f"已达到最大内部验证次数({max_recursive_verify}次)，但任务仍未完成。"
+                    else:
+                        iteration_error = "执行过程中遇到无法克服的问题，任务未能完成。"
+                    
+                    planning_messages.append({
+                        "role": "user", 
+                        "content": f"执行任务时遇到错误。这是第{attempt+1}次尝试，{iteration_error}请分析错误原因并提出改进方案，以便下一次尝试。"
+                    })
+                    
+                    error_analysis_response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=planning_messages,
+                        temperature=0.2
+                    )
+                    
+                    error_analysis = error_analysis_response.choices[0].message.content
+                    print(f"\n===== 错误分析（尝试 {attempt+1}/{max_attempts}）=====")
+                    print(error_analysis)
+                    print("========================\n")
+                    
+                    # 添加错误分析到对话历史
+                    planning_messages.append({"role": "assistant", "content": error_analysis})
+                    
+                    # 如果是最后一次尝试，返回失败
+                    if attempt == max_attempts - 1:
+                        failure_message = f"在{max_attempts}次尝试后，任务执行失败。以下是最终分析：\n\n{error_analysis}"
+                        
+                        # 添加到主对话历史
+                        messages_history.append({"role": "user", "content": user_input})
+                        messages_history.append({"role": "assistant", "content": failure_message})
+                        
+                        # 播放失败消息语音
+                        await text_to_speech(failure_message)
+                        
+                        return True, failure_message
+                    
+            except Exception as e:
+                print(f"\n===== 执行错误 =====")
+                print(f"错误类型: {type(e)}")
+                print(f"错误信息: {str(e)}")
+                print("===================\n")
+                
+                # 如果是最后一次尝试，返回失败
+                if attempt == max_attempts - 1:
+                    error_message = f"执行任务时出现系统错误: {str(e)}"
+                    
+                    # 添加到主对话历史
+                    messages_history.append({"role": "user", "content": user_input})
+                    messages_history.append({"role": "assistant", "content": error_message})
+                    
+                    # 播放错误消息语音
+                    await text_to_speech(error_message)
+                    
+                    return True, error_message
+        
+    except Exception as e:
+        error_message = f"任务规划失败: {str(e)}"
+        print(f"\n===== 规划错误 =====")
+        print(error_message)
+        print("===================\n")
+        
+        # 添加到主对话历史
+        messages_history.append({"role": "user", "content": user_input})
+        messages_history.append({"role": "assistant", "content": error_message})
+        
+        # 播放错误消息语音
+        await text_to_speech(error_message)
+        
+        return True, error_message
 
 def manage_message_history(messages: list, max_messages: int = 10) -> list:
     """
@@ -503,163 +1026,47 @@ async def main(input_message: str):
         messages = clear_context(messages)
         print("上下文已清除")
         return "上下文已清除，您可以开始新的对话了。"
-
+    
+    # 先尝试常规对话，检查是否需要调用工具
     messages.append({"role": "user", "content": input_message})
     messages = manage_message_history(messages)
 
-    max_retries = 8
-    retry_delay = 2  # 秒
-
-    for attempt in range(max_retries):
-        try:
-            # 使用OpenAI客户端格式调用API
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-                temperature=0.3
-            )
-            break  # 如果成功就跳出重试循环
-
-        except Exception as e:
-            if attempt < max_retries - 1:
-                print(f"\n连接失败，{retry_delay}秒后进行第{attempt + 2}次尝试...")
-                await asyncio.sleep(retry_delay)
-                retry_delay *= 2  # 指数退避
-            else:
-                print(f"\n===== API连接错误 =====")
-                print(f"错误类型: {type(e)}")
-                print(f"错误信息: {str(e)}")
-                messages.append({"role": "assistant", "content": "抱歉，我现在无法连接到服务器，请稍后再试。"})
-                return True
-
-    message_data = response.choices[0].message
-
-    # 如果模型调用了工具，则执行相应工具并获取工具返回结果
-    if hasattr(message_data, 'tool_calls') and message_data.tool_calls:
-        tool_calls = message_data.tool_calls
-        tool_outputs = []
-
-        for tool_call in tool_calls:
-            func_name = "未知工具"  # 预先初始化
-            try:
-                func_name = tool_call.function.name
-                args = json.loads(tool_call.function.arguments)
-                print(f"\n正在执行工具: {func_name}")
-                print(f"参数: {args}")
-
-                # 执行相应的工具函数
-                if func_name == "get_current_time":
-                    result = get_current_time(args.get("timezone", "UTC"))
-                elif func_name == "get_weather":
-                    result = get_weather(args["city"])
-                elif func_name == "powershell_command":
-                    result = await powershell_command(args["command"])
-                elif func_name == "email_check":
-                    result = email_check()
-                elif func_name == "email_details":
-                    result = email_details(args["email_id"])
-                elif func_name == "encoding":
-                    result = encoding(args["file_name"], args["code"])
-                elif func_name == "send_mail":
-                    result = send_mail(args["text"], args["receiver"], args["subject"])
-                elif func_name == "R1_opt":
-                    result = R1_opt(args["message"])
-                elif func_name == "ssh":
-                    result = ssh(args["command"])
-                elif func_name == "clear_context":
-                    result = "上下文已清除"
-                    messages = clear_context(messages)
-                else:
-                    raise ValueError(f"未定义的工具调用: {func_name}")
-
-                print(f"工具执行结果: {result}")
-                tool_outputs.append({
-                    "tool_call_id": tool_call.id,
-                    "output": str(result)
-                })
-
-            except Exception as e:
-                error_msg = f"工具执行失败: {str(e)}"
-                print("\n===== 工具执行错误 =====")
-                print(f"工具名称: {func_name}")
-                print(f"错误类型: {type(e)}")
-                print(f"错误信息: {str(e)}")
-                print("========================\n")
-                tool_outputs.append({
-                    "tool_call_id": tool_call.id,
-                    "output": error_msg
-                })
-
-        # 将工具调用结果添加到消息历史
-        messages.append({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
-                    }
-                } for tc in tool_calls
-            ]
-        })
-
-        for output in tool_outputs:
-            messages.append({
-                "role": "tool",
-                "tool_call_id": output["tool_call_id"],
-                "content": output["output"]
-            })
-
-        # 获取最终的总结性回复
-        try:
-            # 创建新的消息列表用于总结请求
-            summary_messages = [
-                {"role": "system", "content": "感情丰富一点，输出要简洁，不要超过100个字"},
-            ]
-
-            # 添加工具调用历史
-            for msg in messages[-5:]:  # 只取最近5条相关消息
-                if msg["role"] in ["assistant", "tool"]:
-                    summary_messages.append(msg)
-
-            # 使用OpenAI客户端格式调用API - 不包含tools参数
-            summary_response = client.chat.completions.create(
-                model=os.environ.get("deepseekmodel", "deepseek-chat"),
-                messages=summary_messages,
-                temperature=0.2
-            )
-
-            assistant_message = summary_response.choices[0].message.content
-            if not assistant_message.strip():
-                assistant_message = "工具调用完成，但未生成总结。"
-
+    try:
+        # 使用OpenAI客户端格式调用API
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=0.3
+        )
+        
+        message_data = response.choices[0].message
+        
+        # 如果模型决定调用工具，则启动任务规划模式
+        if hasattr(message_data, 'tool_calls') and message_data.tool_calls:
+            # 回退消息历史，移除刚刚添加的用户消息，因为任务规划会重新添加
+            messages.pop()
+            print("检测到工具调用，启动任务规划系统...")
+            return await execute_task_with_planning(input_message, messages)
+        else:
+            # 如果不需要调用工具，直接处理普通回复
+            assistant_message = message_data.content
             print("\n小美:", assistant_message)
             messages.append({"role": "assistant", "content": assistant_message})
             
-            # 调用 TTS 函数
+            # 播放结果语音
             await text_to_speech(assistant_message)
-            
-        except Exception as e:
-            print("\n===== 最终响应错误 =====")
-            print(f"错误类型: {type(e)}")
-            print(f"错误信息: {str(e)}")
-            messages.append({"role": "assistant", "content": "尝试生成总结时出现错误。"})
+            return True
 
-    else:
-        # 如果没有工具调用，直接添加模型的回复
-        assistant_message = message_data.content
-        print("\n小美:", assistant_message)
-        messages.append({"role": "assistant", "content": assistant_message})
-
-        # 调用 TTS 函数
-        await text_to_speech(assistant_message)
-
-    return True
+    except Exception as e:
+        print(f"\n===== API连接错误 =====")
+        print(f"错误类型: {type(e)}")
+        print(f"错误信息: {str(e)}")
+        # 使用任务规划作为备选方案
+        messages.pop()  # 移除刚才添加的消息
+        print("常规对话失败，切换到任务规划系统...")
+        return await execute_task_with_planning(input_message, messages)
 
 
 # 语音识别相关代码保持不变
