@@ -785,15 +785,15 @@ async def execute_task_with_planning(user_input, messages_history):
                         for tool_call in tool_calls:
                             func_name = tool_call.function.name
                             args = json.loads(tool_call.function.arguments)
-                            print(f"\n正在执行工具: {func_name}")
-                            print(f"参数: {json.dumps(args, ensure_ascii=False, indent=2)}")
+                            print_info(f"\n正在执行工具: {func_name}")
+                            print_info(f"参数: {json.dumps(args, ensure_ascii=False, indent=2)}")
                             
                             try:
                                 # 对于powershell_command需要用户确认
                                 if func_name == "powershell_command":
                                     command = args.get("command", "")
                                     # 直接执行命令，不需要确认
-                                    print(f"执行命令: {command}")
+                                    print_info(f"执行命令: {command}")
                                     result = await powershell_command(command)
                                 # 执行其他工具函数
                                 elif func_name == "get_current_time":
@@ -836,23 +836,23 @@ async def execute_task_with_planning(user_input, messages_history):
                                     else:
                                         raise ValueError(f"未定义的工具调用: {func_name}")
                                 
-                                print(f"工具执行结果: {result}")
+                                print_success(f"工具执行结果: {result}")
                                 
                                 # 分析执行结果是否有错误
                                 error_info = task_error_analysis(result, {"tool": func_name, "args": args})
                                 if error_info["has_error"]:
-                                    print(f"\n检测到错误: {error_info['analysis']}")
+                                    print_warning(f"\n检测到错误: {error_info['analysis']}")
                                     step_success = False
                                     
                                     # 将错误信息添加到结果中
                                     result = f"{result}\n\n分析: {error_info['analysis']}"
                             except Exception as e:
                                 error_msg = f"工具执行失败: {str(e)}"
-                                print(f"\n===== 工具执行错误 =====")
-                                print(f"工具名称: {func_name}")
-                                print(f"错误类型: {type(e)}")
-                                print(f"错误信息: {str(e)}")
-                                print("========================\n")
+                                print_error(f"\n===== 工具执行错误 =====")
+                                print_error(f"工具名称: {func_name}")
+                                print_error(f"错误类型: {type(e)}")
+                                print_error(f"错误信息: {str(e)}")
+                                print_error("========================\n")
                                 result = error_msg
                                 step_success = False
                             
@@ -879,9 +879,13 @@ async def execute_task_with_planning(user_input, messages_history):
                         {
                             "is_complete": true/false,  // 任务是否完成
                             "completion_status": "简短描述任务状态",
-                            "next_steps": "若任务未完成，下一步需要执行的操作",
+                            "next_steps": ["下一步1", "下一步2"],  // 若任务未完成，下一步需要执行的操作列表
                             "is_failed": true/false,  // 任务是否已失败且无法继续
-                            "failure_reason": "若已失败，失败的原因"
+                            "failure_reason": "若已失败，失败的原因",
+                            "environment_status": {  // 当前环境状态
+                                "key1": "value1",
+                                "key2": "value2"
+                            }
                         }
                         """
                         
@@ -895,9 +899,12 @@ async def execute_task_with_planning(user_input, messages_history):
                         )
                         
                         verify_result = verify_response.choices[0].message.content
-                        print("\n===== 任务验证结果 =====")
+                        print_info("\n===== 任务验证结果 =====")
                         print(verify_result)
-                        print("=========================\n")
+                        print_info("=========================\n")
+                        
+                        # 添加验证结果到消息历史
+                        current_execution_messages.append({"role": "assistant", "content": verify_result})
                         
                         # 解析验证结果
                         try:
@@ -913,28 +920,34 @@ async def execute_task_with_planning(user_input, messages_history):
                                     "completion_status": verify_result[:100] + "..."  # 简短摘要
                                 }
                             
-                            # 添加验证结果到消息历史
-                            current_execution_messages.append({"role": "assistant", "content": verify_result})
-                            
                             # 检查任务是否完成或失败
                             if verify_json.get("is_complete", False) is True:
                                 is_task_complete = True
-                                print("\n✅ 任务已完成! 准备生成总结...")
+                                print_success("\n✅ 任务已完成! 准备生成总结...")
                                 break
                             
                             if verify_json.get("is_failed", False) is True:
-                                print(f"\n❌ 任务无法继续: {verify_json.get('failure_reason', '未知原因')}")
+                                print_error(f"\n❌ 任务无法继续: {verify_json.get('failure_reason', '未知原因')}")
                                 break
                             
                             # 如果任务未完成也未失败，继续下一步
-                            next_step = verify_json.get("next_steps", "请继续执行任务的下一步骤")
+                            next_steps = verify_json.get("next_steps", ["请继续执行任务的下一步骤"])
+                            if isinstance(next_steps, list):
+                                next_step_text = "\n".join([f"- {step}" for step in next_steps])
+                            else:
+                                next_step_text = str(next_steps)
+                            
+                            print_info("\n===== 下一步计划 =====")
+                            print_highlight(next_step_text)
+                            print_info("======================\n")
+                            
                             current_execution_messages.append({
                                 "role": "user", 
-                                "content": f"任务尚未完成。现在请执行下一步: {next_step}"
+                                "content": f"任务尚未完成。现在请执行下一步: {next_step_text}"
                             })
                             
                         except (json.JSONDecodeError, ValueError) as e:
-                            print(f"验证结果解析失败: {str(e)}")
+                            print_error(f"验证结果解析失败: {str(e)}")
                             # 如果解析失败，简单继续
                             current_execution_messages.append({
                                 "role": "user", 
@@ -945,10 +958,15 @@ async def execute_task_with_planning(user_input, messages_history):
                         content = message_data.content
                         current_execution_messages.append({"role": "assistant", "content": content})
                         
+                        # 输出消息内容
+                        print_info("\n===== 助手消息 =====")
+                        print(content)
+                        print_info("====================\n")
+                        
                         # 检查是否包含完成信息
                         if "任务已完成" in content or "任务完成" in content:
                             is_task_complete = True
-                            print("\n✅ 任务已完成! 准备生成总结...")
+                            print_success("\n✅ 任务已完成! 准备生成总结...")
                             break
                         
                         # 如果模型未调用工具但也未完成，提示继续

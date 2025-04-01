@@ -86,7 +86,7 @@
       <recent name="D:\PC-Agent-V1" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.aaaa">
+  <component name="RunManager" selected="Python.deepseekAPI">
     <configuration name="snake_game.html" type="JavascriptDebugType" temporary="true" nameIsGenerated="true" uri="http://localhost:63342/PC-Agent-V1/snake_game.html" useBuiltInWebServerPort="true">
       <method v="2" />
     </configuration>
@@ -184,8 +184,8 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.aaaa" />
         <item itemvalue="Python.deepseekAPI" />
+        <item itemvalue="Python.aaaa" />
         <item itemvalue="JavaScript 调试.snake_game.html" />
         <item itemvalue="Python.2" />
         <item itemvalue="Python.attack" />

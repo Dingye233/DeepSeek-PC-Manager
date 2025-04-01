@@ -683,12 +683,12 @@ async def execute_task_with_planning(user_input, messages_history):
                                 else:
                                     raise ValueError(f"未定义的工具调用: {func_name}")
                                 
-                                print(f"工具执行结果: {result}")
+                                print_success(f"工具执行结果: {result}")
                                 
                                 # 分析执行结果是否有错误
                                 error_info = task_error_analysis(result, {"tool": func_name, "args": args})
                                 if error_info["has_error"]:
-                                    print(f"\n检测到错误: {error_info['analysis']}")
+                                    print_warning(f"\n检测到错误: {error_info['analysis']}")
                                     step_success = False
                                     
                                     # 将错误信息添加到结果中
@@ -703,11 +703,11 @@ async def execute_task_with_planning(user_input, messages_history):
                                 
                             except Exception as e:
                                 error_msg = f"工具执行失败: {str(e)}"
-                                print(f"\n===== 工具执行错误 =====")
-                                print(f"工具名称: {func_name}")
-                                print(f"错误类型: {type(e)}")
-                                print(f"错误信息: {str(e)}")
-                                print("========================\n")
+                                print_error(f"\n===== 工具执行错误 =====")
+                                print_error(f"工具名称: {func_name}")
+                                print_error(f"错误类型: {type(e)}")
+                                print_error(f"错误信息: {str(e)}")
+                                print_error("========================\n")
                                 result = error_msg
                                 step_success = False
                                 
@@ -745,9 +745,13 @@ async def execute_task_with_planning(user_input, messages_history):
                         {
                             "is_complete": true/false,  // 任务是否完成
                             "completion_status": "简短描述任务状态",
-                            "next_steps": "若任务未完成，下一步需要执行的操作",
+                            "next_steps": ["下一步1", "下一步2"],  // 若任务未完成，下一步需要执行的操作列表
                             "is_failed": true/false,  // 任务是否已失败且无法继续
-                            "failure_reason": "若已失败，失败的原因"
+                            "failure_reason": "若已失败，失败的原因",
+                            "environment_status": {  // 当前环境状态
+                                "key1": "value1",
+                                "key2": "value2"
+                            }
                         }
                         """
                         
@@ -761,9 +765,12 @@ async def execute_task_with_planning(user_input, messages_history):
                         )
                         
                         verify_result = verify_response.choices[0].message.content
-                        print("\n===== 任务验证结果 =====")
+                        print_info("\n===== 任务验证结果 =====")
                         print(verify_result)
-                        print("=========================\n")
+                        print_info("=========================\n")
+                        
+                        # 添加验证结果到消息历史
+                        current_execution_messages.append({"role": "assistant", "content": verify_result})
                         
                         # 解析验证结果
                         try:
@@ -779,24 +786,30 @@ async def execute_task_with_planning(user_input, messages_history):
                                     "completion_status": verify_result[:100] + "..."  # 简短摘要
                                 }
                             
-                            # 添加验证结果到消息历史
-                            current_execution_messages.append({"role": "assistant", "content": verify_result})
-                            
                             # 检查任务是否完成或失败
                             if verify_json.get("is_complete", False) is True:
                                 is_task_complete = True
-                                print("\n✅ 任务已完成! 准备生成总结...")
+                                print_success("\n✅ 任务已完成! 准备生成总结...")
                                 break
                             
                             if verify_json.get("is_failed", False) is True:
-                                print(f"\n❌ 任务无法继续: {verify_json.get('failure_reason', '未知原因')}")
+                                print_error(f"\n❌ 任务无法继续: {verify_json.get('failure_reason', '未知原因')}")
                                 break
                             
                             # 如果任务未完成也未失败，继续下一步
-                            next_step = verify_json.get("next_steps", "请继续执行任务的下一步骤")
+                            next_steps = verify_json.get("next_steps", ["请继续执行任务的下一步骤"])
+                            if isinstance(next_steps, list):
+                                next_step_text = "\n".join([f"- {step}" for step in next_steps])
+                            else:
+                                next_step_text = str(next_steps)
+                            
+                            print_info("\n===== 下一步计划 =====")
+                            print_highlight(next_step_text)
+                            print_info("======================\n")
+                            
                             current_execution_messages.append({
                                 "role": "user", 
-                                "content": f"任务尚未完成。现在请执行下一步: {next_step}"
+                                "content": f"任务尚未完成。现在请执行下一步: {next_step_text}"
                             })
                             
                             # 发送验证进度到GUI
@@ -807,7 +820,7 @@ async def execute_task_with_planning(user_input, messages_history):
                                 })
                             
                         except (json.JSONDecodeError, ValueError) as e:
-                            print(f"验证结果解析失败: {str(e)}")
+                            print_error(f"验证结果解析失败: {str(e)}")
                             # 如果解析失败，简单继续
                             current_execution_messages.append({
                                 "role": "user", 
@@ -818,10 +831,15 @@ async def execute_task_with_planning(user_input, messages_history):
                         content = message_data.content
                         current_execution_messages.append({"role": "assistant", "content": content})
                         
+                        # 输出消息内容
+                        print_info("\n===== 助手消息 =====")
+                        print(content)
+                        print_info("====================\n")
+                        
                         # 检查是否包含完成信息
                         if "任务已完成" in content or "任务完成" in content:
                             is_task_complete = True
-                            print("\n✅ 任务已完成! 准备生成总结...")
+                            print_success("\n✅ 任务已完成! 准备生成总结...")
                             break
                         
                         # 如果模型未调用工具但也未完成，提示继续
@@ -851,9 +869,9 @@ async def execute_task_with_planning(user_input, messages_history):
                     )
                     
                     summary = final_response.choices[0].message.content
-                    print("\n===== 任务执行总结 =====")
-                    print(summary)
-                    print("========================\n")
+                    print_info("\n===== 任务执行总结 =====")
+                    print_highlight(summary)
+                    print_info("========================\n")
                     
                     # 添加到主对话历史
                     messages_history.append({"role": "user", "content": user_input})
@@ -884,9 +902,9 @@ async def execute_task_with_planning(user_input, messages_history):
                     )
                     
                     error_analysis = error_analysis_response.choices[0].message.content
-                    print(f"\n===== 错误分析（尝试 {attempt+1}/{max_attempts}）=====")
-                    print(error_analysis)
-                    print("========================\n")
+                    print_info(f"\n===== 错误分析（尝试 {attempt+1}/{max_attempts}）=====")
+                    print_error(error_analysis)
+                    print_info("========================\n")
                     
                     # 添加错误分析到对话历史
                     planning_messages.append({"role": "assistant", "content": error_analysis})
@@ -914,10 +932,10 @@ async def execute_task_with_planning(user_input, messages_history):
                         return failure_message
                     
             except Exception as e:
-                print(f"\n===== 执行错误 =====")
-                print(f"错误类型: {type(e)}")
-                print(f"错误信息: {str(e)}")
-                print("===================\n")
+                print_error(f"\n===== 执行错误 =====")
+                print_error(f"错误类型: {type(e)}")
+                print_error(f"错误信息: {str(e)}")
+                print_error("===================\n")
                 
                 # 发送错误到GUI
                 if 'message_queue' in globals():
@@ -943,9 +961,9 @@ async def execute_task_with_planning(user_input, messages_history):
         
     except Exception as e:
         error_message = f"任务规划失败: {str(e)}"
-        print(f"\n===== 规划错误 =====")
-        print(error_message)
-        print("===================\n")
+        print_error(f"\n===== 规划错误 =====")
+        print_error(error_message)
+        print_error("===================\n")
         
         # 添加到主对话历史
         messages_history.append({"role": "user", "content": user_input})
@@ -980,7 +998,7 @@ async def main(input_message: str):
     # 检查是否是清除上下文的命令
     if input_message.lower() in ["清除上下文", "清空上下文", "clear context", "reset context"]:
         messages = clear_context(messages)
-        print("上下文已清除")
+        print_info("上下文已清除")
         return "上下文已清除，您可以开始新的对话了。"
         
     # 先尝试常规对话，检查是否需要调用工具
@@ -1086,6 +1104,30 @@ def reset_messages():
 def tts(text:str):
     tts_volcano(text)
 
+# 添加颜色打印函数
+def print_color(text, color_code):
+    """使用颜色代码打印文本"""
+    print(f"\033[{color_code}m{text}\033[0m")
+
+def print_success(text):
+    """打印成功消息（绿色）"""
+    print_color(text, "32")
+
+def print_error(text):
+    """打印错误消息（红色）"""
+    print_color(text, "31")
+
+def print_warning(text):
+    """打印警告消息（黄色）"""
+    print_color(text, "33")
+
+def print_info(text):
+    """打印信息消息（蓝色）"""
+    print_color(text, "36")
+
+def print_highlight(text):
+    """打印高亮消息（紫色）"""
+    print_color(text, "35")
 
 if __name__ == "__main__":
     if not os.path.exists("user_information.txt"):
