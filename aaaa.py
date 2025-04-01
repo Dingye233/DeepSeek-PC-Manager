@@ -61,7 +61,7 @@ def tts(text:str):
         except:
             pass
     except Exception as e:
-        print(f"TTS错误: {str(e)}")
+        print_error(f"TTS错误: {str(e)}")
 
 
 async def text_to_speech(text: str):
@@ -73,7 +73,7 @@ async def text_to_speech(text: str):
         # 使用tts函数进行语音合成和播放
         tts(text)
     except Exception as e:
-        print(f"使用Volcano TTS失败: {str(e)}")
+        print_error(f"使用Volcano TTS失败: {str(e)}")
         try:
             # 回退到edge-tts
             communicate = edge_tts.Communicate(text, "zh-CN-XiaoxiaoNeural")
@@ -89,7 +89,7 @@ async def text_to_speech(text: str):
             except:
                 pass
         except Exception as inner_e:
-            print(f"文本转语音失败: {str(inner_e)}")
+            print_error(f"文本转语音失败: {str(inner_e)}")
 
 
 # 生成欢迎语音
@@ -112,15 +112,15 @@ def generate_welcome_audio():
             audio_data = tts_volcano(welcome_text)
             with open("welcome.mp3", "wb") as f:
                 f.write(audio_data)
-            print("欢迎语音已生成")
+            print_success("欢迎语音已生成")
         except Exception as e:
-            print(f"使用火山引擎生成欢迎语音失败: {str(e)}")
+            print_error(f"使用火山引擎生成欢迎语音失败: {str(e)}")
             # 回退到使用edge-tts
             communicate = edge_tts.Communicate(welcome_text, "zh-CN-XiaoxiaoNeural")
             asyncio.run(communicate.save("welcome.mp3"))
-            print("使用备选方法生成欢迎语音")
+            print_success("使用备选方法生成欢迎语音")
     except Exception as e:
-        print(f"生成欢迎语音失败: {str(e)}")
+        print_error(f"生成欢迎语音失败: {str(e)}")
 
 
 def encoding(file_name: str, code: str) -> str:
@@ -1099,7 +1099,7 @@ def clear_context(messages: list) -> list:
         system_messages = [{"role": "system", "content": f"你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: {user_info}"}]
     
     # 添加一个标记，表示上下文已清空
-    print("上下文已清除，只保留系统消息")
+    print_info("上下文已清除，只保留系统消息")
     return system_messages
 
 
@@ -1145,7 +1145,7 @@ async def main(input_message: str):
         if hasattr(message_data, 'tool_calls') and message_data.tool_calls:
             # 回退消息历史，移除刚刚添加的用户消息，因为任务规划会重新添加
             messages.pop()
-            print("检测到工具调用，启动任务规划系统...")
+            print_info("检测到工具调用，启动任务规划系统...")
             # 语音提示开始执行任务
             await text_to_speech("我需要使用工具来完成这个任务，正在规划执行步骤")
             return await execute_task_with_planning(input_message, messages)
@@ -1171,8 +1171,8 @@ async def main(input_message: str):
         if 'message_queue' in globals():
             message_queue.put({"type": "error", "text": error_msg})
         
-        print(f"常规对话失败: {error_msg}")
-        print("切换到任务规划系统...")
+        print_error(f"常规对话失败: {error_msg}")
+        print_info("切换到任务规划系统...")
         
         # 移除刚才添加的消息
         messages.pop()
@@ -1314,7 +1314,7 @@ def recognize_speech() -> str:
         
         # 如果API密钥为空，尝试使用备用密钥
         if not api_key:
-            print("警告：API密钥未设置，请检查环境变量")
+            print_warning("警告：API密钥未设置，请检查环境变量")
             api_key = os.getenv("gjldkey")
             
         headers = {
@@ -1325,12 +1325,12 @@ def recognize_speech() -> str:
         with sr.Microphone() as source:
             # 调整环境噪声
             r.adjust_for_ambient_noise(source, duration=0.5)
-            print("正在听取您的语音...")
+            print_info("正在听取您的语音...")
             try:
                 audio = r.listen(source, timeout=5, phrase_time_limit=10)
-                print("录音结束，正在识别...")
+                print_info("录音结束，正在识别...")
             except sr.WaitTimeoutError:
-                print("超时未检测到语音输入")
+                print_warning("超时未检测到语音输入")
                 return ""
 
         temp_file = f"temp_audio_{uuid.uuid4().hex}.wav"  # 使用唯一文件名
@@ -1350,10 +1350,10 @@ def recognize_speech() -> str:
                 text = result['text']
                 return text
         except requests.exceptions.RequestException as e:
-            print(f"语音识别请求错误: {e}")
+            print_error(f"语音识别请求错误: {e}")
             return ""
         except (KeyError, TypeError, ValueError) as e:
-            print(f"语音识别响应格式错误: {e}")
+            print_error(f"语音识别响应格式错误: {e}")
             return ""
         finally:
             # 删除临时文件
@@ -1361,9 +1361,9 @@ def recognize_speech() -> str:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
             except OSError as e:
-                print(f"删除临时文件失败: {e}")
+                print_error(f"删除临时文件失败: {e}")
     except Exception as e:
-        print(f"语音识别过程错误: {e}")
+        print_error(f"语音识别过程错误: {e}")
     return ""
 
 
