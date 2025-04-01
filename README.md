@@ -128,7 +128,6 @@ python aaaa.py
 或双击`start_voice_mode.bat`
 
 ### 交互方式
-- **Web界面**: 支持Markdown显示和代码高亮，最佳用户体验
 - **基础版本**: 仅支持文字输入/输出
 - **完整版本**: 支持语音输入(连续1.5秒静音自动结束)和语音输出(自动将回复转为语音)
 
@@ -202,11 +201,6 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 
 4. **依赖安装问题**：
    - 尝试使用国内镜像源: `pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
-
-5. **Web界面无法启动**：
-   - 确保已安装Flask和其他Web相关依赖
-   - 检查端口5000是否被其他应用占用
-   - 如果端口被占用，修改`web_ui.py`中的端口号
 
 ## 项目结构
 
