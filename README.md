@@ -230,5 +230,5 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 
 如有问题或建议，请通过以下方式联系：
 
-- Email: your-email@example.com
-- GitHub: https://github.com/yourusername/your-repo
+- Email: 1792491376@qq.com
+- GitHub: https://github.com/Dingye233/DeepSeek-PC-Manager
