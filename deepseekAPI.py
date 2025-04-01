@@ -1138,18 +1138,7 @@ if __name__ == "__main__":
     print("程序启动成功")
     while True:
         try:
-            # print("\n请选择输入方式:")
-            # print("1. 文本输入")
-            # print("2. 语音输入")
-            # choice = input("输入选项(1或2): ").strip()
-            
-            # if choice == '1':
             input_message = input("\n输入消息: ")
-            # elif choice == '2':
-            #     input_message = recognize_speech()
-            # else:
-            #     print("无效的选项,请重新输入")
-            #     continue
             
             if input_message:
                 should_continue = asyncio.run(main(input_message))
