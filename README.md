@@ -10,7 +10,6 @@
 - **自主任务规划**：AI自动分解复杂任务并执行
 - **错误处理与修复**：自动检测执行错误并尝试修复
 - **上下文理解**：保持对话上下文连续性
-- **Web界面**：现代化网页界面，支持Markdown显示和代码高亮
 
 ### 工具集成
 - **文件操作**：创建、读取、修改文件 (`code_generator.py`)
@@ -44,7 +43,6 @@ python aaaa.py
 或双击`start_voice_mode.bat`
 
 ### 交互方式
-- **Web界面**: 支持Markdown显示和代码高亮，最佳用户体验
 - **基础版本**: 仅支持文字输入/输出
 - **完整版本**: 支持语音输入(连续1.5秒静音自动结束)和语音输出(自动将回复转为语音)
 
@@ -119,11 +117,6 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 4. **依赖安装问题**：
    - 尝试使用国内镜像源: `pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
 
-5. **Web界面无法启动**：
-   - 确保已安装Flask和其他Web相关依赖
-   - 检查端口5000是否被其他应用占用
-   - 如果端口被占用，修改`web_ui.py`中的端口号
-
 ## 项目结构
 
 ```
@@ -139,3 +132,5 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 ## 许可证
 
 仅供个人学习和研究使用
+
+联系邮箱：1792491376@qq.com
