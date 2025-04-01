@@ -1367,46 +1367,76 @@ def recognize_speech() -> str:
     return ""
 
 
+# 添加彩色打印功能
+def print_color(text, color_code):
+    """
+    使用ANSI颜色代码打印彩色文本
+    :param text: 要打印的文本
+    :param color_code: ANSI颜色代码
+    """
+    print(f"\033[{color_code}m{text}\033[0m")
+
+def print_success(text):
+    """打印成功消息（绿色）"""
+    print_color(text, 32)
+
+def print_error(text):
+    """打印错误消息（红色）"""
+    print_color(text, 31)
+
+def print_warning(text):
+    """打印警告消息（黄色）"""
+    print_color(text, 33)
+
+def print_info(text):
+    """打印一般信息（青色）"""
+    print_color(text, 36)
+
+def print_highlight(text):
+    """打印高亮信息（洋红/紫色）"""
+    print_color(text, 35)
+
+
 if __name__ == "__main__":
     if not os.path.exists("user_information.txt"):
         with open("user_information.txt", "w", encoding="utf-8") as file:
             file.write("用户关键信息表:user_information.txt")
-        print(f"文件 '{"user_information.txt"}' 已创建")
+        print_success(f"文件 '{"user_information.txt"}' 已创建")
 
     # 生成并播放欢迎语音
     try:
         if not os.path.exists("welcome.mp3") or os.path.getsize("welcome.mp3") < 100:
             generate_welcome_audio()
         
-        print("正在播放欢迎语音...")
+        print_info("正在播放欢迎语音...")
         playsound("welcome.mp3")
     except Exception as e:
-        print(f"播放欢迎语音失败: {str(e)}")
+        print_error(f"播放欢迎语音失败: {str(e)}")
         # 直接合成并播放欢迎语音
         try:
             asyncio.run(text_to_speech("语音增强版AI助手已启动"))
         except Exception:
             pass
 
-    print("语音增强版AI助手已启动，仅使用语音交互")
+    print_success("语音增强版AI助手已启动，仅使用语音交互")
     while True:
         try:
-            print("\n等待语音输入中...")
+            print_info("\n等待语音输入中...")
             input_message = recognize_speech()
             
             if not input_message:
-                print("未能识别语音输入，请重新尝试...")
+                print_warning("未能识别语音输入，请重新尝试...")
                 continue
             
-            print(f"语音识别结果: {input_message}")
+            print_highlight(f"语音识别结果: {input_message}")
             should_continue = asyncio.run(main(input_message))
             if not should_continue:
                 break
         except KeyboardInterrupt:
-            print("\n程序已被用户中断")
+            print_warning("\n程序已被用户中断")
             break
         except Exception as e:
-            print("\n===== 主程序错误 =====")
-            print(f"错误类型: {type(e)}")
-            print(f"错误信息: {str(e)}")
-            print("=====================\n")
+            print_error("\n===== 主程序错误 =====")
+            print_error(f"错误类型: {type(e)}")
+            print_error(f"错误信息: {str(e)}")
+            print_error("=====================\n")
