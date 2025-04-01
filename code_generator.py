@@ -252,21 +252,3 @@ def read_code_file(file_name: str) -> Dict[str, Any]:
             "message": f"文件读取失败: {str(e)}",
             "error": str(e)
         }
-
-# 测试函数
-if __name__ == "__main__":
-    # 测试代码生成
-    test_code = """
-def hello_world():
-    print("Hello, World!")
-    
-if __name__ == "__main__":
-    hello_world()
-"""
-    
-    result = generate_code("test_generated.py", test_code)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    
-    # 测试代码验证
-    validation = verify_python_code(test_code)
-    print(json.dumps(validation, indent=2, ensure_ascii=False)) 

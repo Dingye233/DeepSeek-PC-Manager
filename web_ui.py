@@ -203,8 +203,30 @@ def stream():
         while not message_queue.empty():
             message_queue.get()
         
-        # 启动处理线程
-        threading.Thread(target=lambda: asyncio.run(backend.main(user_input))).start()
+        # 启动处理线程 - 确保在新线程中完整运行异步函数
+        def run_backend_task():
+            # 创建新的事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # 在新循环中运行后端主函数
+                result = loop.run_until_complete(backend.main(user_input))
+                print(f"后端处理完成: {result}")
+            except Exception as e:
+                print(f"后端处理错误: {str(e)}")
+                # 发送错误到消息队列
+                message_queue.put({
+                    "type": "error",
+                    "text": f"处理请求时出错: {str(e)}"
+                })
+                message_queue.put({"type": "complete"})
+            finally:
+                loop.close()
+        
+        # 启动独立线程运行后端任务
+        backend_thread = threading.Thread(target=run_backend_task)
+        backend_thread.daemon = True  # 设置为守护线程
+        backend_thread.start()
         
         # 返回流式更新的端点
         return jsonify({"status": "processing", "stream_url": "/api/stream_updates"})
@@ -265,12 +287,12 @@ def extract_tool_calls(text):
     """从响应中提取工具调用信息"""
     tool_calls = []
     
-    # 搜索工具调用的模式
-    pattern = r'调用工具[：:]\s*`([^`]+)`|使用工具[：:]\s*`([^`]+)`|执行命令[：:]\s*`([^`]+)`|运行命令[：:]\s*`([^`]+)`'
+    # 扩展模式匹配更多的工具调用格式
+    pattern = r'调用工具[：:]\s*`([^`]+)`|使用工具[：:]\s*`([^`]+)`|执行命令[：:]\s*`([^`]+)`|运行命令[：:]\s*`([^`]+)`|工具调用[：:]\s*`([^`]+)`|工具名称[：:]\s*`([^`]+)`'
     matches = re.finditer(pattern, text, re.MULTILINE)
     
     for match in matches:
-        # 获取匹配的工具名称（从4个捕获组中选择非None的一个）
+        # 获取匹配的工具名称（从捕获组中选择非None的一个）
         tool_name = next((g for g in match.groups() if g is not None), "未知工具")
         tool_calls.append({
             "tool": tool_name,
@@ -281,12 +303,12 @@ def extract_tool_calls(text):
 
 def extract_task_planning(text):
     """从响应中提取任务规划信息"""
-    # 搜索任务规划的模式
-    plan_pattern = r'任务计划[：:](.*?)(?=\n\n|$)|计划步骤[：:](.*?)(?=\n\n|$)|我将按照以下步骤(.*?)(?=\n\n|$)'
+    # 扩展模式匹配更多的任务规划格式
+    plan_pattern = r'任务计划[：:](.*?)(?=\n\n|$)|计划步骤[：:](.*?)(?=\n\n|$)|我将按照以下步骤(.*?)(?=\n\n|$)|执行计划[：:](.*?)(?=\n\n|$)|处理步骤[：:](.*?)(?=\n\n|$)'
     plan_match = re.search(plan_pattern, text, re.DOTALL)
     
     if plan_match:
-        # 获取匹配的计划内容（从3个捕获组中选择非None的一个）
+        # 获取匹配的计划内容（从捕获组中选择非None的一个）
         plan_content = next((g for g in plan_match.groups() if g is not None), "")
         return {
             "has_plan": True,
@@ -301,16 +323,27 @@ def stream_updates():
     """提供来自消息队列的流式更新"""
     def generate():
         last_id = None
+        timeout_counter = 0
+        max_timeout = 600  # 最大等待时间（秒）
         
-        while True:
+        while timeout_counter < max_timeout:
             try:
                 if not message_queue.empty():
                     message = message_queue.get()
+                    timeout_counter = 0  # 重置超时计数器
                     
                     # 添加工具调用和任务规划分析
                     if message.get("type") == "assistant" and "text" in message:
                         message["tool_calls"] = extract_tool_calls(message["text"])
                         message["task_planning"] = extract_task_planning(message["text"])
+                    
+                    # 记录工具调用结果
+                    if message.get("type") == "tool_result":
+                        print(f"工具执行结果: {message.get('text', '')}")
+                    
+                    # 记录错误信息
+                    if message.get("type") == "error":
+                        print(f"错误信息: {message.get('text', '')}")
                     
                     message_id = message.get("id", str(uuid.uuid4()))
                     if message_id != last_id:
@@ -319,13 +352,25 @@ def stream_updates():
                     
                     # 如果是完成消息，退出循环
                     if message.get("type") == "complete":
+                        print("流式处理完成")
                         break
                 else:
                     time.sleep(0.1)
+                    timeout_counter += 0.1
+                    
+                    # 每5秒发送一次心跳保持连接
+                    if timeout_counter % 5 < 0.1:
+                        yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
             except Exception as e:
                 print(f"流式更新错误: {e}")
                 yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
                 break
+        
+        # 如果超时，发送超时消息
+        if timeout_counter >= max_timeout:
+            print("流式处理超时")
+            yield f"data: {json.dumps({'type': 'error', 'text': '处理请求超时，请重试'})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
     
     return Response(stream_with_context(generate()), content_type='text/event-stream')
 

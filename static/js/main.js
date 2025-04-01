@@ -153,20 +153,63 @@ function connectToStream(streamUrl) {
     
     // 当前消息内容
     let currentContent = '';
+    let heartbeatTimer = null;
+    let connectionTimeout = null;
     
     // 连接到流式更新
     eventSource = new EventSource(streamUrl);
     
+    // 初始化连接超时计时器
+    connectionTimeout = setTimeout(() => {
+        showError('连接超时，请重试');
+        eventSource.close();
+        resetState();
+    }, 15000); // 15秒超时
+    
     // 处理消息
     eventSource.onmessage = (event) => {
         try {
+            // 清除连接超时计时器
+            if (connectionTimeout) {
+                clearTimeout(connectionTimeout);
+                connectionTimeout = null;
+            }
+            
+            // 重置心跳计时器
+            if (heartbeatTimer) {
+                clearTimeout(heartbeatTimer);
+            }
+            
+            // 设置新的心跳超时
+            heartbeatTimer = setTimeout(() => {
+                showError('连接中断，请重试');
+                eventSource.close();
+                resetState();
+            }, 30000); // 30秒无响应则中断
+            
             const data = JSON.parse(event.data);
+            
+            // 处理心跳消息
+            if (data.type === 'heartbeat') {
+                console.log('收到心跳');
+                return;
+            }
             
             // 处理错误
             if (data.type === 'error') {
                 showError(data.text || '流式连接错误');
                 eventSource.close();
                 resetState();
+                return;
+            }
+            
+            // 处理工具结果
+            if (data.type === 'tool_result') {
+                const toolResultElement = document.createElement('div');
+                toolResultElement.className = 'tool-result';
+                toolResultElement.innerHTML = `<span class="icon">✅</span> ${data.text}`;
+                messageElement.querySelector('.message-content').appendChild(toolResultElement);
+                scrollToBottom();
                 return;
             }
             
@@ -200,6 +243,10 @@ function connectToStream(streamUrl) {
             
             // 完成处理
             if (data.type === 'complete') {
+                if (heartbeatTimer) {
+                    clearTimeout(heartbeatTimer);
+                    heartbeatTimer = null;
+                }
                 eventSource.close();
                 resetState();
             }
@@ -211,9 +258,31 @@ function connectToStream(streamUrl) {
         }
     };
     
+    // 处理打开连接
+    eventSource.onopen = () => {
+        console.log('流式连接已建立');
+        // 清除连接超时
+        if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+            connectionTimeout = null;
+        }
+    };
+    
     // 处理错误
     eventSource.onerror = () => {
+        console.error('流式连接错误');
         showError('流式连接中断');
+        
+        // 清除所有计时器
+        if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+            connectionTimeout = null;
+        }
+        if (heartbeatTimer) {
+            clearTimeout(heartbeatTimer);
+            heartbeatTimer = null;
+        }
+        
         eventSource.close();
         resetState();
     };
@@ -312,7 +381,15 @@ function createToolCallsElement(toolCalls) {
     toolCalls.forEach(tool => {
         const toolItem = document.createElement('li');
         toolItem.className = 'tool-item';
-        toolItem.textContent = tool.tool;
+        toolItem.innerHTML = `<span class="tool-name">${tool.tool}</span>`;
+        
+        // 添加工具状态指示器
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'tool-status';
+        statusSpan.textContent = '处理中...';
+        statusSpan.dataset.tool = tool.tool;
+        toolItem.appendChild(statusSpan);
+        
         toolsList.appendChild(toolItem);
     });
     
@@ -329,18 +406,56 @@ function simplifyContent(content, toolCalls, taskPlanning) {
     // 移除工具调用描述
     if (toolCalls && toolCalls.length > 0) {
         toolCalls.forEach(tool => {
-            const pattern = new RegExp(`(调用工具[：:]\\s*\`${tool.tool}\`.*?\\n)|(使用工具[：:]\\s*\`${tool.tool}\`.*?\\n)|(执行命令[：:]\\s*\`${tool.tool}\`.*?\\n)|(运行命令[：:]\\s*\`${tool.tool}\`.*?\\n)`, 'g');
-            result = result.replace(pattern, '');
+            // 使用更广泛的模式匹配所有可能的工具调用格式
+            const patterns = [
+                new RegExp(`调用工具[：:]\\s*\`${escapeRegExp(tool.tool)}\`.*?\\n`, 'g'),
+                new RegExp(`使用工具[：:]\\s*\`${escapeRegExp(tool.tool)}\`.*?\\n`, 'g'),
+                new RegExp(`执行命令[：:]\\s*\`${escapeRegExp(tool.tool)}\`.*?\\n`, 'g'),
+                new RegExp(`运行命令[：:]\\s*\`${escapeRegExp(tool.tool)}\`.*?\\n`, 'g'),
+                new RegExp(`工具调用[：:]\\s*\`${escapeRegExp(tool.tool)}\`.*?\\n`, 'g'),
+                new RegExp(`工具名称[：:]\\s*\`${escapeRegExp(tool.tool)}\`.*?\\n`, 'g')
+            ];
+            
+            patterns.forEach(pattern => {
+                result = result.replace(pattern, '');
+            });
         });
     }
     
     // 移除任务规划描述
     if (taskPlanning && taskPlanning.has_plan) {
-        const planPattern = /(任务计划[：:].*?)(?=\n\n|$)|(计划步骤[：:].*?)(?=\n\n|$)|(我将按照以下步骤.*?)(?=\n\n|$)/s;
-        result = result.replace(planPattern, '');
+        const planPatterns = [
+            /(任务计划[：:].*?)(?=\n\n|$)/s,
+            /(计划步骤[：:].*?)(?=\n\n|$)/s,
+            /(我将按照以下步骤.*?)(?=\n\n|$)/s,
+            /(执行计划[：:].*?)(?=\n\n|$)/s,
+            /(处理步骤[：:].*?)(?=\n\n|$)/s
+        ];
+        
+        planPatterns.forEach(pattern => {
+            result = result.replace(pattern, '');
+        });
     }
     
+    // 清理连续的空行
+    result = result.replace(/\n{3,}/g, '\n\n');
+    
     return result;
+}
+
+// 用于正则表达式中的字符串转义
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// 更新工具状态
+function updateToolStatus(toolName, status, success = true) {
+    const toolStatusElements = document.querySelectorAll(`.tool-status[data-tool="${toolName}"]`);
+    
+    toolStatusElements.forEach(element => {
+        element.textContent = status;
+        element.className = 'tool-status ' + (success ? 'success' : 'error');
+    });
 }
 
 // 添加消息到聊天界面

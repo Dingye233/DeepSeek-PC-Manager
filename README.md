@@ -258,3 +258,23 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 
 - Email: 1792491376@qq.com
 - GitHub: https://github.com/Dingye233/DeepSeek-PC-Manager
+
+## UI界面
+
+本项目提供简单的Web界面：
+
+### Web界面
+
+使用Flask和原生JavaScript构建的简洁Web界面，位于`templates`和`static`目录下。
+
+```bash
+python web_ui.py
+```
+
+或者可以使用提供的一键启动脚本：
+
+```bash
+start_web_only.bat
+```
+
+通过浏览器访问 http://localhost:5000 即可使用Web界面。

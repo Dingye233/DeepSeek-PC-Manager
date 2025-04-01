@@ -1,0 +1,93 @@
+/* 颜色变量 */
+:root {
+  // 主要颜色
+  --primary-color: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-light: #e0e7ff;
+  
+  // 辅助颜色
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --error-color: #ef4444;
+  --info-color: #3b82f6;
+  
+  // 中性色
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-tertiary: #6b7280;
+  --text-quaternary: #9ca3af;
+  
+  // 背景色
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --bg-tertiary: #f3f4f6;
+  --bg-quaternary: #e5e7eb;
+  
+  // 边框色
+  --border-color: #e5e7eb;
+  --border-color-light: #f3f4f6;
+  
+  // 阴影
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* 暗黑模式变量 */
+[data-theme="dark"] {
+  // 主要颜色
+  --primary-color: #5e73ff;
+  --primary-hover: #4f46e5;
+  --primary-light: #262d4d;
+  
+  // 辅助颜色
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --error-color: #ef4444;
+  --info-color: #3b82f6;
+  
+  // 中性色
+  --text-primary: #f9fafb;
+  --text-secondary: #e5e7eb;
+  --text-tertiary: #d1d5db;
+  --text-quaternary: #9ca3af;
+  
+  // 背景色
+  --bg-primary: #1f2937;
+  --bg-secondary: #111827;
+  --bg-tertiary: #0f172a;
+  --bg-quaternary: #1e293b;
+  
+  // 边框色
+  --border-color: #374151;
+  --border-color-light: #1e293b;
+  
+  // 阴影
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.26);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+}
+
+/* 响应式断点 */
+$breakpoints: (
+  'xs': 0,
+  'sm': 576px,
+  'md': 768px,
+  'lg': 992px,
+  'xl': 1200px,
+  'xxl': 1400px
+);
+
+/* 间距 */
+$spacer: 1rem;
+$spacers: (
+  0: 0,
+  1: ($spacer * 0.25),  // 4px
+  2: ($spacer * 0.5),   // 8px
+  3: ($spacer * 1),     // 16px
+  4: ($spacer * 1.5),   // 24px
+  5: ($spacer * 2),     // 32px
+  6: ($spacer * 3),     // 48px
+  7: ($spacer * 4),     // 64px
+  8: ($spacer * 5),     // 80px
+); 

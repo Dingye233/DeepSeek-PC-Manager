@@ -468,28 +468,50 @@ header h1 span {
 .thinking {
     display: none;
     align-self: flex-start;
-    background-color: var(--assistant-msg-bg);
-    border: 1px solid var(--border-color);
+    background-color: var(--primary-color);
+    color: white;
     border-radius: 12px;
     padding: 12px 16px;
-    color: var(--light-text);
-    font-style: italic;
-    animation: pulse 1.5s infinite;
+    font-weight: 500;
+    margin: 8px 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    font-size: 1.0rem;
+    position: relative;
+    animation: bounce 2s infinite;
 }
 
 .thinking.visible {
-    display: block;
+    display: flex;
+    align-items: center;
 }
 
-@keyframes pulse {
-    0% {
-        opacity: 0.6;
+.thinking::after {
+    content: "";
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    margin-left: 10px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: white;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
     }
-    50% {
-        opacity: 1;
+}
+
+@keyframes bounce {
+    0%, 20%, 50%, 80%, 100% {
+        transform: translateY(0);
     }
-    100% {
-        opacity: 0.6;
+    40% {
+        transform: translateY(-5px);
+    }
+    60% {
+        transform: translateY(-2px);
     }
 }
 
@@ -519,6 +541,9 @@ header h1 span {
 .tool-item {
     position: relative;
     padding: 4px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .tool-item:before {
@@ -526,6 +551,46 @@ header h1 span {
     position: absolute;
     left: -12px;
     color: var(--primary-color);
+}
+
+.tool-name {
+    font-weight: 500;
+}
+
+.tool-status {
+    font-size: 0.8rem;
+    color: var(--light-text);
+    background-color: rgba(0, 0, 0, 0.05);
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
+.tool-status.success {
+    color: var(--success-color);
+    background-color: rgba(16, 185, 129, 0.1);
+}
+
+.tool-status.error {
+    color: var(--error-color);
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+.tool-result {
+    margin: 8px 0;
+    padding: 8px 10px;
+    background-color: rgba(16, 185, 129, 0.05);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+}
+
+.tool-result .icon {
+    margin-right: 8px;
+    font-size: 1rem;
+    color: var(--success-color);
 }
 
 .task-planning-content {
