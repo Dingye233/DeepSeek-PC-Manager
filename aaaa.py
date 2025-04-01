@@ -1058,59 +1058,60 @@ async def main(input_message: str):
 # 替代输入函数，从Web前端获取用户输入
 async def get_web_console_input(prompt: str, default_value: str = None) -> str:
     """
-    从Web前端获取用户输入
+    从控制台获取用户输入
     :param prompt: 提示信息
     :param default_value: 默认值
     :return: 用户输入的字符串
     """
-    # 将此函数替换为从web_ui中的console_response_queue获取输入
-    from web_ui import get_console_input
-    
-    try:
-        # 调用web_ui中的函数获取用户输入
-        result = get_console_input(prompt, default_value)
-        return result if result is not None else default_value
-    except Exception as e:
-        print(f"获取用户输入出错: {str(e)}")
-        return default_value
+    print(f"{prompt} ", end="")
+    if default_value:
+        print(f"[默认: {default_value}] ", end="")
+    user_input = input()
+    return user_input if user_input.strip() else default_value
 
 
 # 替代确认函数，从Web前端获取用户确认
 async def get_web_console_confirm(prompt: str, confirm_text: str = "确认", cancel_text: str = "取消") -> bool:
     """
-    从Web前端获取用户确认
+    从控制台获取用户确认
     :param prompt: 提示信息
     :param confirm_text: 确认按钮文本
     :param cancel_text: 取消按钮文本
     :return: 用户是否确认
     """
-    from web_ui import get_console_confirm
-    
-    try:
-        # 调用web_ui中的函数获取用户确认
-        return get_console_confirm(prompt, confirm_text, cancel_text)
-    except Exception as e:
-        print(f"获取用户确认出错: {str(e)}")
-        return False
+    print(f"{prompt} (y/{confirm_text}/是 或 n/{cancel_text}/否)")
+    while True:
+        user_input = input("> ").lower()
+        if user_input in ["y", "yes", "是", confirm_text.lower()]:
+            return True
+        elif user_input in ["n", "no", "否", "不", cancel_text.lower()]:
+            return False
+        else:
+            print("无效输入，请重新输入 (y/n)")
 
 
 # 替代选择函数，从Web前端获取用户选择
 async def get_web_console_select(prompt: str, options: list) -> dict:
     """
-    从Web前端获取用户选择
+    从控制台获取用户选择
     :param prompt: 提示信息
     :param options: 选项列表
     :return: 包含选择的值和索引的字典
     """
-    from web_ui import get_console_select
+    print(f"{prompt}")
+    for i, option in enumerate(options):
+        print(f"{i+1}. {option}")
     
-    try:
-        # 调用web_ui中的函数获取用户选择
-        result = get_console_select(prompt, options)
-        return result if result is not None else {"value": None, "index": -1}
-    except Exception as e:
-        print(f"获取用户选择出错: {str(e)}")
-        return {"value": None, "index": -1}
+    while True:
+        try:
+            user_input = input("请输入选项编号: ")
+            selection = int(user_input) - 1
+            if 0 <= selection < len(options):
+                return {"value": options[selection], "index": selection}
+            else:
+                print(f"请输入1到{len(options)}之间的数字")
+        except ValueError:
+            print("请输入有效的数字")
 
 
 # 语音识别相关代码保持不变
@@ -1253,12 +1254,30 @@ if __name__ == "__main__":
             print(f"语音合成播放失败: {str(e)}")
             
     print("程序启动成功")
+    print("请选择输入模式:")
+    print("1. 语音模式（默认）")
+    print("2. 文本输入模式")
+    
+    mode_choice = input("请选择 (1/2): ")
+    use_voice_mode = mode_choice != "2"
+    
+    if use_voice_mode:
+        print("已选择语音模式，您可以通过语音输入与AI交流")
+    else:
+        print("已选择文本输入模式，您可以通过键盘输入与AI交流")
+    
     while True:
         try:
-            user_message = recognize_speech()
-
+            if use_voice_mode:
+                user_message = recognize_speech()
+            else:
+                print("\n请输入您的问题 (输入 'quit' 退出):")
+                user_message = input("> ")
+                
             if user_message:
                 should_continue = asyncio.run(main(user_message))
+                if not should_continue:
+                    break
 
         except KeyboardInterrupt:
             print("\n程序已被用户中断")
