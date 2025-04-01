@@ -27,6 +27,7 @@ import wave
 import uuid
 from tts_http_demo import tts_volcano
 import code_tools  # 导入新的代码工具模块
+import traceback
 
 load_dotenv()
 
@@ -626,275 +627,222 @@ def task_error_analysis(result, task_context):
 
 async def execute_task_with_planning(user_input, messages_history):
     """
-    使用任务规划执行用户请求
+    使用任务规划系统执行任务并返回结果
+    :param user_input: 用户输入
+    :param messages_history: 对话历史
+    :return: (任务是否完成, 任务结果)
     """
-    # 添加任务规划系统消息
-    planning_messages = messages_history.copy()
-    
-    # 替换或添加任务规划系统消息
-    system_message_index = next((i for i, msg in enumerate(planning_messages) if msg["role"] == "system"), None)
-    if system_message_index is not None:
-        combined_content = planning_messages[system_message_index]["content"] + "\n\n" + task_planning_system_message["content"]
-        planning_messages[system_message_index]["content"] = combined_content
-    else:
-        planning_messages.insert(0, task_planning_system_message)
-    
-    # 添加用户输入
-    planning_messages.append({"role": "user", "content": f"请完成以下任务，并详细规划执行步骤：{user_input}"})
-    
-    # 获取任务规划
     try:
-        planning_response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=planning_messages,
-            temperature=0.3
-        )
+        # 任务执行结果
+        max_attempts = 2  # 最大尝试次数
+        max_recursive_verify = 2  # 最大内部递归验证次数
         
-        task_plan = planning_response.choices[0].message.content
-        print("\n===== 任务规划 =====")
-        print(task_plan)
-        print("====================\n")
+        # 构建任务规划提示
+        system_prompt = """你是一个强大的AI助手，具有丰富的知识并能使用工具执行任务。
+你需要详细规划任务执行步骤，使用可用的工具完成用户指令。
+分析任务、考虑各种因素，并清晰地解释你的决策过程。
+如果遇到任务需要多个步骤，请拆分任务并按照步骤一步步来。
+
+对于需要工具操作的任务，你必须：
+1. 分析任务需求
+2. 规划工具使用策略
+3. 逐步执行所需工具
+4. 总结执行结果并以高度概括性方式输出
+
+始终确保工具使用：
+- 正确地理解工具的功能和调用方式
+- 检查参数是否正确完整
+- 验证工具执行结果
+- 分析执行中的错误并寻找解决方案
+- 如果需要操作系统命令，要特别注意命令格式的正确性
+
+结果总结需要：精确、简洁（不超过100字）、重点突出，避免过于冗长的描述。如果是命令的输出结果，优先保留命令执行的实际输出。
+"""
         
-        # 添加任务规划到对话历史
-        planning_messages.append({"role": "assistant", "content": task_plan})
+        # 创建任务规划的消息历史，包含系统提示和用户请求
+        planning_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input}
+        ]
         
-        # 执行任务（最多尝试5次）
-        max_attempts = 5
+        # 多次尝试循环
         for attempt in range(max_attempts):
             try:
-                # 添加执行提示
-                execution_prompt = f"现在开始执行任务计划的第{attempt+1}次尝试。请调用适当的工具执行计划中的步骤。"
-                if attempt > 0:
-                    execution_prompt += f" 这是第{attempt+1}次尝试，前面{attempt}次尝试失败。请根据之前的错误调整策略。"
+                # 创建任务规划响应
+                planning_response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=planning_messages,
+                    tools=tools,
+                    temperature=0.2
+                )
                 
-                planning_messages.append({"role": "user", "content": execution_prompt})
+                # 获取任务规划回复
+                planning_message = planning_response.choices[0].message
                 
-                # 初始化递归验证
-                recursive_verify_count = 0
-                max_recursive_verify = 10  # 最大递归验证次数
-                is_task_complete = False
-                current_execution_messages = planning_messages.copy()
-                
-                # 内部递归验证循环
-                while recursive_verify_count < max_recursive_verify and not is_task_complete:
-                    recursive_verify_count += 1
-                    print(f"\n===== 任务执行迭代 {recursive_verify_count}/{max_recursive_verify} =====")
+                # 如果规划不包含工具调用，直接添加消息并返回
+                if not hasattr(planning_message, 'tool_calls') or not planning_message.tool_calls:
+                    content = planning_message.content
+                    planning_messages.append({"role": "assistant", "content": content})
                     
-                    # 调用API执行任务步骤
-                    execution_response = client.chat.completions.create(
-                        model="deepseek-chat",
-                        messages=current_execution_messages,
-                        tools=tools,
-                        tool_choice="auto",
-                        temperature=0.3
+                    # 和用户确认是否满意这个非工具的回答
+                    confirmation = await get_web_console_confirm(
+                        prompt="AI没有检测到需要使用工具。是否接受以下回答？\n\n" + content,
+                        confirm_text="接受回答", 
+                        cancel_text="重试"
                     )
                     
-                    message_data = execution_response.choices[0].message
-                    
-                    # 处理工具调用
-                    if hasattr(message_data, 'tool_calls') and message_data.tool_calls:
-                        # 执行工具调用并收集结果
-                        tool_calls = message_data.tool_calls
-                        tool_outputs = []
-                        step_success = True
+                    if confirmation:
+                        # 添加到主对话历史
+                        messages_history.append({"role": "user", "content": user_input})
+                        messages_history.append({"role": "assistant", "content": content})
                         
-                        # 添加助手消息和工具调用
-                        current_execution_messages.append({
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": tc.id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tc.function.name,
-                                        "arguments": tc.function.arguments
-                                    }
-                                } for tc in tool_calls
-                            ]
+                        # 播放结果语音
+                        await text_to_speech(content)
+                        
+                        return True, content
+                    else:
+                        # 如果用户不满意，在规划历史中添加反馈，要求使用工具
+                        planning_messages.append({
+                            "role": "user", 
+                            "content": "请使用系统工具来完成这个任务。可以调用工具API来帮助解决问题。"
                         })
+                        continue  # 继续下一次循环尝试
+                
+                # 添加规划消息到规划历史
+                planning_messages.append(planning_message)
+                
+                # 递归执行并验证任务
+                recursive_verify_count = 0
+                task_completed = False
+                
+                # 内部验证循环
+                while recursive_verify_count < max_recursive_verify and not task_completed:
+                    # 处理工具调用
+                    has_tools = hasattr(planning_message, 'tool_calls') and planning_message.tool_calls
+                    if has_tools:
+                        # 执行工具调用前显示规划
+                        print("\n===== 任务规划 =====")
+                        if hasattr(planning_message, 'content') and planning_message.content:
+                            print(planning_message.content)
+                        print("===================\n")
                         
-                        for tool_call in tool_calls:
-                            func_name = tool_call.function.name
-                            args = json.loads(tool_call.function.arguments)
-                            print(f"\n正在执行工具: {func_name}")
-                            print(f"参数: {args}")
+                        # 处理工具调用
+                        for tool_call in planning_message.tool_calls:
+                            # 获取工具调用信息
+                            function_name = tool_call.function.name
+                            arguments = json.loads(tool_call.function.arguments)
                             
-                            try:
-                                # 执行工具函数
-                                if func_name == "get_current_time":
-                                    result = get_current_time(args.get("timezone", "UTC"))
-                                elif func_name == "get_weather":
-                                    result = get_weather(args["city"])
-                                elif func_name == "powershell_command":
-                                    result = await powershell_command(args["command"])
-                                elif func_name == "email_check":
-                                    result = email_check()
-                                elif func_name == "email_details":
-                                    result = email_details(args["email_id"])
-                                elif func_name == "encoding":
-                                    result = encoding(args["file_name"], args["code"])
-                                elif func_name == "send_mail":
-                                    result = send_mail(args["text"], args["receiver"], args["subject"])
-                                elif func_name == "R1_opt":
-                                    result = R1_opt(args["message"])
-                                elif func_name == "ssh":
-                                    result = ssh(args["command"])
-                                elif func_name == "clear_context":
-                                    result = "上下文已清除"
-                                    current_execution_messages = clear_context(current_execution_messages)
-                                elif func_name == "write_code":
-                                    result = code_tools.write_code(args["file_name"], args["code"])
-                                elif func_name == "verify_code":
-                                    result = code_tools.verify_code(args["code"])
-                                elif func_name == "append_code":
-                                    result = code_tools.append_code(args["file_name"], args["content"])
-                                elif func_name == "read_code":
-                                    result = code_tools.read_code(args["file_name"])
-                                elif func_name == "create_module":
-                                    result = code_tools.create_module(args["module_name"], args["functions_json"])
+                            # 打印工具调用信息
+                            print(f"\n===== 工具调用 =====")
+                            print(f"工具: {function_name}")
+                            print(f"参数: {json.dumps(arguments, ensure_ascii=False, indent=2)}")
+                            print("====================\n")
+                            
+                            # 对于需要用户确认的命令（如powershell_command），先获取用户确认
+                            if function_name == "powershell_command":
+                                command = arguments.get("command", "")
+                                
+                                confirmation = await get_web_console_confirm(
+                                    prompt=f"AI准备执行以下命令:\n{command}\n\n是否允许执行?",
+                                    confirm_text="执行", 
+                                    cancel_text="拒绝"
+                                )
+                                
+                                if not confirmation:
+                                    # 用户拒绝执行命令，返回错误给AI
+                                    function_response = "用户拒绝执行该命令"
+                                    print(f"命令执行被用户拒绝: {command}")
                                 else:
-                                    raise ValueError(f"未定义的工具调用: {func_name}")
-                                
-                                print(f"工具执行结果: {result}")
-                                
-                                # 分析执行结果是否有错误
-                                error_info = task_error_analysis(result, {"tool": func_name, "args": args})
-                                if error_info["has_error"]:
-                                    print(f"\n检测到错误: {error_info['analysis']}")
-                                    step_success = False
-                                    
-                                    # 将错误信息添加到结果中
-                                    result = f"{result}\n\n分析: {error_info['analysis']}"
-                                
-                            except Exception as e:
-                                error_msg = f"工具执行失败: {str(e)}"
-                                print(f"\n===== 工具执行错误 =====")
-                                print(f"工具名称: {func_name}")
-                                print(f"错误类型: {type(e)}")
-                                print(f"错误信息: {str(e)}")
-                                print("========================\n")
-                                result = error_msg
-                                step_success = False
+                                    # 用户同意，执行命令
+                                    try:
+                                        function_response = await powershell_command(command)
+                                    except Exception as e:
+                                        function_response = f"执行命令时出错: {str(e)}"
+                            elif function_name == "get_user_input_async":
+                                # 对于需要用户输入的调用，改用Web前端获取输入
+                                prompt = arguments.get("prompt", "请输入")
+                                try:
+                                    function_response = await get_web_console_input(prompt)
+                                except Exception as e:
+                                    function_response = f"获取用户输入时出错: {str(e)}"
+                            else:
+                                # 执行其他工具调用
+                                try:
+                                    # 查找正确的函数
+                                    function_to_call = globals().get(function_name)
+                                    if function_to_call:
+                                        # 调用函数
+                                        if asyncio.iscoroutinefunction(function_to_call):
+                                            function_response = await function_to_call(**arguments)
+                                        else:
+                                            function_response = function_to_call(**arguments)
+                                    else:
+                                        function_response = f"错误: 找不到函数 {function_name}"
+                                except Exception as e:
+                                    traceback_str = traceback.format_exc()
+                                    error_info = parse_error_message(traceback_str)
+                                    function_response = f"调用工具时出错: {error_info}"
                             
-                            # 添加工具结果到消息历史
-                            current_execution_messages.append({
+                            # 打印工具结果
+                            print(f"\n===== 工具结果 =====")
+                            print(function_response)
+                            print("====================\n")
+                            
+                            # 将工具结果添加到规划历史中
+                            planning_messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
-                                "content": str(result)
-                            })
-                            
-                            tool_outputs.append({
-                                "tool_call_id": tool_call.id,
-                                "output": str(result)
+                                "content": str(function_response)[:8000]  # 限制结果长度
                             })
                         
-                        # 验证当前步骤执行后，任务是否完成
-                        verify_prompt = """
-                        基于目前的执行情况，请分析当前任务的完成状态:
-                        1. 任务是否已完全完成？如果完成，请详细说明完成的内容和结果。
-                        2. 如果任务未完成，还需要执行哪些步骤？
-                        3. 是否存在无法克服的障碍使任务无法继续？
-                        
-                        请严格按照以下格式回复:
-                        {
-                            "is_complete": true/false,  // 任务是否完成
-                            "completion_status": "简短描述任务状态",
-                            "next_steps": "若任务未完成，下一步需要执行的操作",
-                            "is_failed": true/false,  // 任务是否已失败且无法继续
-                            "failure_reason": "若已失败，失败的原因"
-                        }
-                        """
-                        
-                        current_execution_messages.append({"role": "user", "content": verify_prompt})
-                        
-                        # 调用验证
-                        verify_response = client.chat.completions.create(
+                        # 获取下一步操作建议
+                        next_step_response = client.chat.completions.create(
                             model="deepseek-chat",
-                            messages=current_execution_messages,
-                            temperature=0.1
+                            messages=planning_messages,
+                            tools=tools,
+                            temperature=0.2
                         )
                         
-                        verify_result = verify_response.choices[0].message.content
-                        print("\n===== 任务验证结果 =====")
-                        print(verify_result)
-                        print("=========================\n")
+                        planning_message = next_step_response.choices[0].message
+                        planning_messages.append(planning_message)
                         
-                        # 解析验证结果
-                        try:
-                            # 尝试提取JSON部分
-                            json_match = re.search(r'({.*})', verify_result, re.DOTALL)
-                            if json_match:
-                                verify_json = json.loads(json_match.group(1))
-                            else:
-                                # 如果没有明确的JSON，尝试更灵活的解析
-                                verify_json = {
-                                    "is_complete": "true" in verify_result.lower() and "完成" in verify_result,
-                                    "is_failed": "失败" in verify_result or "无法继续" in verify_result,
-                                    "completion_status": verify_result[:100] + "..."  # 简短摘要
-                                }
-                            
-                            # 添加验证结果到消息历史
-                            current_execution_messages.append({"role": "assistant", "content": verify_result})
-                            
-                            # 检查任务是否完成或失败
-                            if verify_json.get("is_complete", False) is True:
-                                is_task_complete = True
-                                print("\n✅ 任务已完成! 准备生成总结...")
-                                break
-                            
-                            if verify_json.get("is_failed", False) is True:
-                                print(f"\n❌ 任务无法继续: {verify_json.get('failure_reason', '未知原因')}")
-                                break
-                            
-                            # 如果任务未完成也未失败，继续下一步
-                            next_step = verify_json.get("next_steps", "请继续执行任务的下一步骤")
-                            current_execution_messages.append({
-                                "role": "user", 
-                                "content": f"任务尚未完成。现在请执行下一步: {next_step}"
-                            })
-                            
-                        except (json.JSONDecodeError, ValueError) as e:
-                            print(f"验证结果解析失败: {str(e)}")
-                            # 如果解析失败，简单继续
-                            current_execution_messages.append({
-                                "role": "user", 
-                                "content": "请继续执行任务的下一步骤。"
-                            })
+                        # 检查任务是否完成
+                        # 提示AI确认任务是否完成
+                        verification_prompt = "任务是否已完成？如果已完成，请总结结果；如果未完成，请说明下一步需要执行的操作。"
+                        planning_messages.append({"role": "user", "content": verification_prompt})
+                        
+                        verification_response = client.chat.completions.create(
+                            model="deepseek-chat",
+                            messages=planning_messages,
+                            temperature=0.2
+                        )
+                        
+                        verification_content = verification_response.choices[0].message.content
+                        planning_messages.append({"role": "assistant", "content": verification_content})
+                        
+                        # 根据验证响应判断任务是否完成
+                        if any(phrase in verification_content.lower() for phrase in ["任务已完成", "已完成", "完成了", "成功完成", "task completed", "completed"]):
+                            task_completed = True
+                        else:
+                            recursive_verify_count += 1
+                            print(f"\n===== 任务验证（{recursive_verify_count}/{max_recursive_verify}）=====")
+                            print(verification_content)
+                            print("============================\n")
                     else:
-                        # 没有工具调用，可能是任务结束或需要进一步指导
-                        content = message_data.content
-                        current_execution_messages.append({"role": "assistant", "content": content})
-                        
-                        # 检查是否包含完成信息
-                        if "任务已完成" in content or "任务完成" in content:
-                            is_task_complete = True
-                            print("\n✅ 任务已完成! 准备生成总结...")
-                            break
-                        
-                        # 如果模型未调用工具但也未完成，提示继续
-                        if recursive_verify_count < max_recursive_verify:
-                            current_execution_messages.append({
-                                "role": "user", 
-                                "content": "请继续执行任务，如果需要，请调用相应的工具。"
-                            })
+                        task_completed = True  # 如果没有工具调用，则认为任务已完成
                 
-                # 内部递归结束后，更新外部消息历史
-                planning_messages = current_execution_messages.copy()
-                
-                # 检查任务是否在递归内完成
-                if is_task_complete:
-                    # 任务成功，获取总结回复
+                # 如果任务已完成，生成最终响应
+                if task_completed:
+                    # 请求AI总结
                     planning_messages.append({
                         "role": "user", 
-                        "content": "任务执行完成，请简洁总结执行结果（不超过100字）。使用简短句子，避免复杂解释。"
+                        "content": "请提供任务执行的最终总结。回答应简明扼要（最多100字），包括关键结果和重要信息。"
                     })
                     
                     final_response = client.chat.completions.create(
                         model="deepseek-chat",
                         messages=planning_messages,
-                        temperature=0.2,
-                        max_tokens=150  # 限制token数量
+                        temperature=0.2
                     )
                     
                     summary = final_response.choices[0].message.content
@@ -1048,7 +996,31 @@ async def main(input_message: str):
             # 回退消息历史，移除刚刚添加的用户消息，因为任务规划会重新添加
             messages.pop()
             print("检测到工具调用，启动任务规划系统...")
-            return await execute_task_with_planning(input_message, messages)
+            
+            # 向用户确认是否进入任务规划模式
+            confirmation = await get_web_console_confirm(
+                prompt="检测到此任务需要使用系统工具。是否继续执行?",
+                confirm_text="继续执行",
+                cancel_text="仅对话"
+            )
+            
+            if confirmation:
+                return await execute_task_with_planning(input_message, messages)
+            else:
+                # 用户选择不使用工具，使用普通对话
+                messages.append({"role": "user", "content": f"请不要使用任何工具，仅用对话方式回答我的问题：{input_message}"})
+                response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=messages,
+                    temperature=0.3
+                )
+                assistant_message = response.choices[0].message.content
+                print("\n小美:", assistant_message)
+                messages.append({"role": "assistant", "content": assistant_message})
+                
+                # 播放结果语音
+                await text_to_speech(assistant_message)
+                return True
         else:
             # 如果不需要调用工具，直接处理普通回复
             assistant_message = message_data.content
@@ -1066,7 +1038,79 @@ async def main(input_message: str):
         # 使用任务规划作为备选方案
         messages.pop()  # 移除刚才添加的消息
         print("常规对话失败，切换到任务规划系统...")
-        return await execute_task_with_planning(input_message, messages)
+        
+        # 向用户告知错误并确认是否进入任务规划模式
+        confirmation = await get_web_console_confirm(
+            prompt=f"常规对话出现错误：{str(e)}。是否尝试任务规划模式？",
+            confirm_text="尝试任务规划",
+            cancel_text="放弃"
+        )
+        
+        if confirmation:
+            return await execute_task_with_planning(input_message, messages)
+        else:
+            error_message = f"对话失败：{str(e)}，且用户选择不使用任务规划模式。"
+            messages.append({"role": "user", "content": input_message})
+            messages.append({"role": "assistant", "content": error_message})
+            return True
+
+
+# 替代输入函数，从Web前端获取用户输入
+async def get_web_console_input(prompt: str, default_value: str = None) -> str:
+    """
+    从Web前端获取用户输入
+    :param prompt: 提示信息
+    :param default_value: 默认值
+    :return: 用户输入的字符串
+    """
+    # 将此函数替换为从web_ui中的console_response_queue获取输入
+    from web_ui import get_console_input
+    
+    try:
+        # 调用web_ui中的函数获取用户输入
+        result = get_console_input(prompt, default_value)
+        return result if result is not None else default_value
+    except Exception as e:
+        print(f"获取用户输入出错: {str(e)}")
+        return default_value
+
+
+# 替代确认函数，从Web前端获取用户确认
+async def get_web_console_confirm(prompt: str, confirm_text: str = "确认", cancel_text: str = "取消") -> bool:
+    """
+    从Web前端获取用户确认
+    :param prompt: 提示信息
+    :param confirm_text: 确认按钮文本
+    :param cancel_text: 取消按钮文本
+    :return: 用户是否确认
+    """
+    from web_ui import get_console_confirm
+    
+    try:
+        # 调用web_ui中的函数获取用户确认
+        return get_console_confirm(prompt, confirm_text, cancel_text)
+    except Exception as e:
+        print(f"获取用户确认出错: {str(e)}")
+        return False
+
+
+# 替代选择函数，从Web前端获取用户选择
+async def get_web_console_select(prompt: str, options: list) -> dict:
+    """
+    从Web前端获取用户选择
+    :param prompt: 提示信息
+    :param options: 选项列表
+    :return: 包含选择的值和索引的字典
+    """
+    from web_ui import get_console_select
+    
+    try:
+        # 调用web_ui中的函数获取用户选择
+        result = get_console_select(prompt, options)
+        return result if result is not None else {"value": None, "index": -1}
+    except Exception as e:
+        print(f"获取用户选择出错: {str(e)}")
+        return {"value": None, "index": -1}
 
 
 # 语音识别相关代码保持不变
