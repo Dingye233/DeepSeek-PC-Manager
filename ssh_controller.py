@@ -13,7 +13,7 @@ def ssh_interactive_command(ip, username, password, initial_command):
 
         # 创建交互式shell
         shell = client.invoke_shell()
-        shell.settimeout(5)  # 设置命令执行超时
+        shell.settimeout(240)  # 设置命令执行超时
 
         # 等待shell初始化
         time.sleep(1)
@@ -29,18 +29,22 @@ def ssh_interactive_command(ip, username, password, initial_command):
             if shell.recv_ready():
                 data = shell.recv(4096).decode('utf-8', errors='replace')
                 output.append(data)
-                print(data, end='', flush=True)  # 实时输出
+                print(data, end='', flush=True)
 
-                # 检测交互提示
+                # 新增命令结束检测（匹配 $, #, > 等提示符）
+                if re.search(r'[\$#>\]]\s*$', data.split('\n')[-1]):
+                    break
+                
                 if _need_user_input(data):
                     response = _get_user_response(data)
                     shell.send(response + "\n")
-                    start_time = time.time()  # 重置超时计时
+                    start_time = time.time()
 
-            elif shell.exit_status_ready():  # 命令已执行完成
+            elif shell.exit_status_ready():
                 break
 
-            time.sleep(0.1)
+            # 延长检测间隔减少CPU占用
+            time.sleep(0.5)
 
         # 获取最终输出
         final_output = ''.join(output).strip()

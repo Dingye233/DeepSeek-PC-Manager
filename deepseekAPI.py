@@ -7,14 +7,11 @@ from playsound import playsound
 import os
 import tempfile
 import requests
-import geopy
-import keyboard
-import threading
 import get_email
 import speech_recognition as sr
 import keyboard
 import time
-import subprocess
+
 import re
 from queue import Queue, Empty
 from threading import Thread
@@ -25,24 +22,11 @@ from dotenv import load_dotenv
 from R1_optimize import r1_optimizer as R1
 import pyaudio
 import wave
+from tts_http_demo import tts_volcano
 import uuid
 
 load_dotenv()
-# 1. TTS 功能实现
-async def text_to_speech(text: str, voice: str = "zh-CN-XiaoxiaoNeural"):
-    try:
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-        temp_file_path = temp_file.name
-        temp_file.close()
-
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(temp_file_path)
-        playsound(temp_file_path)
-
-        if os.path.exists(temp_file_path):
-            os.unlink(temp_file_path)
-    except Exception as e:
-        print(f"TTS 错误: {str(e)}")
+message_queue = Queue()
 
 def encoding(file_name:str,code:str)->str:
 
@@ -229,13 +213,14 @@ tools = [
         "type":"function",
         "function":{
            "name":"ssh",
-            "description":"通过ssh远程连接ubuntu服务器并且输入命令控制远程服务器",
+            "description":"管理远程ubuntu服务器",
             "parameters":{
                 "type":"object",
                 "properties":{
                     "command":{
+
                         "type":"string",
-                        "description":"ubuntu服务器的命令"
+                        "description":"输入ubuntu服务器的命令"
                     }
                 },
                 "required": ["command"]
@@ -324,7 +309,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "encoding",
-            "description": "创建一个任意后缀的文件，并且填写内容进去然后保存，最后返回一个该文件的绝对路径",
+            "description": "创建指定文件并写入内容，返回一个该文件的绝对路径",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -334,7 +319,7 @@ tools = [
                     },
                     "encoding": {
                         "type": "string",
-                        "description": "输入进文件的内容，可以是一段话也可以是代码"
+                        "description": "输入文件的内容"
                     }
                 },
                 "required": ["file_name", "encoding"]
@@ -369,33 +354,30 @@ tools = [
         "type": "function",
         "function": {
             "name":"R1_opt",
-            "description":"此工具维护，停止使用",
+            "description":"调用深度思考模型r1来解决棘手问题",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "message": {
                         "type": "string",
-                        "description":"需要解决的文本和代码或者其他内容"
+                        "description":"输入棘手的问题"
                     }
                 },
                 "required": ["message"]
             }
         }
-    }
+    },
 ]
 
 client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
-# messages = [{"role": "system",
-#              "content": "你叫小美你乐于助人，心地善良，活泼聪明，不要像个ai工具那样说话 "},
-#             {"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "},
-#             {"role": "system","content": " 这些是用户的一些关键信息，可能有用: "+user_information_read()}]
 
-messages = [{"role": "system","content": " 你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: "+user_information_read()}]
+
+messages = [{"role": "system","content": " 你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: "+user_information_read()}, 
+{"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "}]
 
 
 # check_model_message=[{"role": "system",
 #          "content": "你是任务审查模型，需要审查用户的任务是否被模型完成，如果没有完成则补充下一步该干什么，最后再让被审查模型继续执行"}]
-
 
 async def main(input_message: str):
     if input_message.lower() == 'quit':
@@ -409,23 +391,19 @@ async def main(input_message: str):
             messages=messages,
             tools=tools,
             tool_choice="auto",
-            temperature=1.3
+            temperature=0.3
         )
-        print("API 调用成功")
-        print("Raw Response:", response)
+        # 移除调试输出
+        # print("API 调用成功") 
+        print(response.choices[0].message.content)
 
     except Exception as e:
-        print("\n===== API 错误信息 =====")
-        print(f"错误类型: {type(e)}")
-        print(f"错误信息: {str(e)}")
-        if hasattr(e, 'response'):
-            print(f"响应状态码: {e.response.status_code}")
-            print(f"响应内容: {e.response.text}")
-        print("========================\n")
+        # 将错误信息发送到GUI队列
+        error_msg = f"API错误: {str(e)}"
+        message_queue.put({"type": "error", "text": error_msg})
         return True
 
     try:
-        # 如果模型决定使用工具
         if response.choices[0].message.tool_calls:
             tool_calls = response.choices[0].message.tool_calls
             tool_outputs = []
@@ -434,8 +412,12 @@ async def main(input_message: str):
                 try:
                     func_name = tool_call.function.name
                     args = json.loads(tool_call.function.arguments)
-                    print(f"\n正在执行工具: {func_name}")
-                    print(f"参数: {args}")
+                    # 发送工具调用信息到GUI
+                    message_queue.put({
+                        "type": "tool_call",
+                        "text": f"正在执行 {func_name} 工具"
+                    })
+                    
                     if func_name == "get_current_time":
                         result = get_current_time(args.get("timezone", "UTC"))
                     elif func_name == "get_weather":
@@ -461,12 +443,15 @@ async def main(input_message: str):
 
                 except Exception as e:
                     error_msg = f"工具执行失败: {str(e)}"
-                    print(f"\n===== 工具执行错误 =====")
-                    print(f"工具名称: {func_name}")
-                    print(f"错误类型: {type(e)}")
-                    print(f"错误信息: {str(e)}")
-                    print("========================\n")
+                    # 发送错误到GUI
+                    message_queue.put({"type": "error", "text": error_msg})
                     result = error_msg
+
+                # 发送工具结果到GUI
+                message_queue.put({
+                    "type": "tool_result",
+                    "text": f"{func_name} 执行完成"
+                })
 
                 tool_outputs.append({
                     "tool_call_id": tool_call.id,
@@ -494,6 +479,16 @@ async def main(input_message: str):
                     temperature=0.3
                 )
                 print("最终响应获取成功")
+                print(response.choices[0].message.content)
+                # audio_data=tts(str(response.choices[0].message.content))
+                # # 保存为临时文件
+                # temp_file = "temp_audio.mp3"
+                # with open(temp_file, "wb") as audio_file:
+                #     audio_file.write(audio_data)
+
+                # playsound(temp_file)
+
+                # os.remove(temp_file)
 
             except Exception as e:
                 print("\n===== 最终响应错误 =====")
@@ -505,22 +500,20 @@ async def main(input_message: str):
                 print("========================\n")
                 return True
 
-        # 如果没有工具调用，直接添加模型的回复
+        # 最终响应处理
         assistant_message = response.choices[0].message.content
-        print("\n小美:", assistant_message)
-        messages.append({"role": "assistant", "content": assistant_message})
-
-        # 调用 TTS 函数
-        await text_to_speech(assistant_message)
-
-        return True
+        # 发送到GUI队列
+        message_queue.put({"type": "assistant", "text": assistant_message})
+        
+        # 添加完成标记
+        message_queue.put({"type": "complete"})
+        return assistant_message  # 直接返回字符串内容
 
     except Exception as e:
-        print("\n===== 程序执行错误 =====")
-        print(f"错误类型: {type(e)}")
-        print(f"错误信息: {str(e)}")
-        print("========================\n")
-        return True
+        error_msg = f"处理错误: {str(e)}"
+        message_queue.put({"type": "error", "text": error_msg})
+        message_queue.put({"type": "complete"})  # 确保异常时也标记完成
+        return f"处理错误: {str(e)}"  # 返回错误信息字符串
 
 
 def recognize_speech() -> str:
@@ -572,6 +565,14 @@ def recognize_speech() -> str:
 
     return ""
 
+def reset_messages():
+    """重置消息历史到初始状态"""
+    global messages
+    messages = [{"role": "system","content": " 你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: "+user_information_read()}] 
+
+def tts(text:str):
+    tts_volcano(text)
+
 
 if __name__ == "__main__":
     if not os.path.exists("user_information.txt"):
@@ -582,18 +583,18 @@ if __name__ == "__main__":
     print("程序启动成功")
     while True:
         try:
-            print("\n请选择输入方式:")
-            print("1. 文本输入")
-            print("2. 语音输入")
-            choice = input("输入选项(1或2): ").strip()
+            # print("\n请选择输入方式:")
+            # print("1. 文本输入")
+            # print("2. 语音输入")
+            # choice = input("输入选项(1或2): ").strip()
             
-            if choice == '1':
-                input_message = input("\n输入消息: ")
-            elif choice == '2':
-                input_message = recognize_speech()
-            else:
-                print("无效的选项,请重新输入")
-                continue
+            # if choice == '1':
+            input_message = input("\n输入消息: ")
+            # elif choice == '2':
+            #     input_message = recognize_speech()
+            # else:
+            #     print("无效的选项,请重新输入")
+            #     continue
             
             if input_message:
                 should_continue = asyncio.run(main(input_message))

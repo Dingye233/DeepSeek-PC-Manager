@@ -3,4 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="nshscript" />
   </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="nshscript" project-jdk-type="Python SDK" />
 </project>
