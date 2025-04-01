@@ -44,10 +44,25 @@ def tts(text:str):
     调用tts_volcano进行语音合成并播放
     """
     try:
-        # 调用火山引擎TTS
-        tts_volcano(text)
+        # 生成一个临时文件名
+        temp_file = f"temp_audio_{uuid.uuid4().hex}.mp3"
+        
+        # 调用火山引擎TTS并保存音频
+        audio_data = tts_volcano(text)
+        with open(temp_file, "wb") as f:
+            f.write(audio_data)
+        
+        # 播放音频
+        playsound(temp_file)
+        
+        # 播放完后删除临时文件
+        try:
+            os.remove(temp_file)
+        except:
+            pass
     except Exception as e:
-        print(f"TTS 错误: {str(e)}")
+        print(f"TTS合成或播放失败: {str(e)}")
+        traceback.print_exc()
 
 
 async def text_to_speech(text: str):
@@ -85,23 +100,29 @@ def generate_welcome_audio():
     """
     try:
         welcome_text = "语音模式已启动，我是您的AI助手小美，请问有什么可以帮助您的？"
+        
+        # 确保欢迎语音文件不存在
         if os.path.exists("welcome.mp3"):
             try:
                 os.remove("welcome.mp3")
             except:
                 pass
         
-        # 使用更好的语音合成
-        tts(welcome_text)
-        
-        # 如果没有生成welcome.mp3，则使用edge-tts
-        if not os.path.exists("welcome.mp3"):
+        # 使用火山引擎TTS生成欢迎语音
+        try:
+            audio_data = tts_volcano(welcome_text)
+            with open("welcome.mp3", "wb") as f:
+                f.write(audio_data)
+            print("欢迎语音已生成")
+        except Exception as e:
+            print(f"使用火山引擎生成欢迎语音失败: {str(e)}")
+            # 回退到使用edge-tts
             communicate = edge_tts.Communicate(welcome_text, "zh-CN-XiaoxiaoNeural")
             asyncio.run(communicate.save("welcome.mp3"))
-        
-        print("欢迎语音已生成")
+            print("使用备选方法生成欢迎语音")
     except Exception as e:
-        print(f"生成欢迎语音失败: {str(e)}")
+        print(f"生成欢迎语音完全失败: {str(e)}")
+        traceback.print_exc()
 
 
 def encoding(file_name: str, code: str) -> str:
