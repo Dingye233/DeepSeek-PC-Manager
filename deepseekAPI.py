@@ -367,6 +367,17 @@ tools = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "clear_context",
+            "description": "清除对话历史上下文，只保留系统消息",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
 ]
 
 client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
@@ -379,9 +390,27 @@ messages = [{"role": "system","content": " 你叫小美，是一个热情的ai�
 # check_model_message=[{"role": "system",
 #          "content": "你是任务审查模型，需要审查用户的任务是否被模型完成，如果没有完成则补充下一步该干什么，最后再让被审查模型继续执行"}]
 
+def clear_context(messages: list) -> list:
+    """
+    清除对话上下文
+    :param messages: 当前的对话历史
+    :return: 清空后的对话历史，只保留系统消息
+    """
+    # 保留系统消息，清除其他消息
+    system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+    return [system_message] if system_message else []
+
 async def main(input_message: str):
+    global messages
+    
     if input_message.lower() == 'quit':
         return False
+
+    # 检查是否是清除上下文的命令
+    if input_message.lower() in ["清除上下文", "清空上下文", "clear context", "reset context"]:
+        messages = clear_context(messages)
+        print("上下文已清除")
+        return "上下文已清除，您可以开始新的对话了。"
 
     messages.append({"role": "user", "content": input_message})
 
@@ -436,6 +465,9 @@ async def main(input_message: str):
                         result = R1_opt(args["message"])
                     elif func_name == "ssh":
                         result = ssh(args["command"])
+                    elif func_name == "clear_context":
+                        result = "上下文已清除"
+                        messages = clear_context(messages)
                     else:
                         raise ValueError(f"未定义的工具调用: {func_name}")
 
@@ -508,7 +540,7 @@ async def main(input_message: str):
         # 添加完成标记
         message_queue.put({"type": "complete"})
         return assistant_message  # 直接返回字符串内容
-
+        
     except Exception as e:
         error_msg = f"处理错误: {str(e)}"
         message_queue.put({"type": "error", "text": error_msg})

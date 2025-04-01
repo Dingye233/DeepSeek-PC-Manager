@@ -59,6 +59,38 @@ async def text_to_speech(text: str):
         print(f"TTS 错误: {str(e)}")
 
 
+def generate_welcome_audio():
+    """
+    生成欢迎语音文件
+    """
+    try:
+        welcome_text = "语音模式启动"
+        audio_data = tts_volcano(welcome_text)
+        
+        # 确保文件路径存在
+        if os.path.exists("welcome.mp3"):
+            try:
+                os.remove("welcome.mp3")
+                print("已删除旧的欢迎语音文件")
+            except Exception as e:
+                print(f"删除旧文件失败: {str(e)}")
+        
+        # 写入新文件
+        with open("welcome.mp3", "wb") as f:
+            f.write(audio_data)
+        
+        # 验证文件大小
+        if os.path.getsize("welcome.mp3") < 100:  # 文件过小可能无效
+            print("警告：生成的语音文件过小，可能是无效文件")
+            return False
+            
+        print("欢迎语音文件已生成")
+        return True
+    except Exception as e:
+        print(f"生成欢迎语音文件失败: {str(e)}")
+        return False
+
+
 def encoding(file_name: str, code: str) -> str:
     return python_tools.encoding(code, file_name)
 
@@ -250,6 +282,17 @@ tools = [
     {
         "type": "function",
         "function": {
+            "name": "clear_context",
+            "description": "清除对话历史上下文，只保留系统消息",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ssh",
             "description": "管理远程ubuntu服务器",
             "parameters": {
@@ -438,11 +481,28 @@ def manage_message_history(messages: list, max_messages: int = 10) -> list:
     return system_messages + kept_messages
 
 
+def clear_context(messages: list) -> list:
+    """
+    清除对话上下文
+    :param messages: 当前的对话历史
+    :return: 清空后的对话历史，只保留系统消息
+    """
+    # 保留系统消息，清除其他消息
+    system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+    return [system_message] if system_message else []
+
+
 async def main(input_message: str):
     global messages
 
     if input_message.lower() == 'quit':
         return False
+
+    # 检查是否是清除上下文的命令
+    if input_message.lower() in ["清除上下文", "清空上下文", "clear context", "reset context"]:
+        messages = clear_context(messages)
+        print("上下文已清除")
+        return "上下文已清除，您可以开始新的对话了。"
 
     messages.append({"role": "user", "content": input_message})
     messages = manage_message_history(messages)
@@ -501,13 +561,16 @@ async def main(input_message: str):
                 elif func_name == "email_details":
                     result = email_details(args["email_id"])
                 elif func_name == "encoding":
-                    result = encoding(args["file_name"], args["encoding"])
+                    result = encoding(args["file_name"], args["code"])
                 elif func_name == "send_mail":
                     result = send_mail(args["text"], args["receiver"], args["subject"])
                 elif func_name == "R1_opt":
                     result = R1_opt(args["message"])
                 elif func_name == "ssh":
                     result = ssh(args["command"])
+                elif func_name == "clear_context":
+                    result = "上下文已清除"
+                    messages = clear_context(messages)
                 else:
                     raise ValueError(f"未定义的工具调用: {func_name}")
 
@@ -566,7 +629,7 @@ async def main(input_message: str):
 
             # 使用OpenAI客户端格式调用API - 不包含tools参数
             summary_response = client.chat.completions.create(
-                model=os.environ.get("deepseekmodel"),
+                model=os.environ.get("deepseekmodel", "deepseek-chat"),
                 messages=summary_messages,
                 temperature=0.2
             )
@@ -577,10 +640,10 @@ async def main(input_message: str):
 
             print("\n小美:", assistant_message)
             messages.append({"role": "assistant", "content": assistant_message})
-
+            
             # 调用 TTS 函数
             await text_to_speech(assistant_message)
-
+            
         except Exception as e:
             print("\n===== 最终响应错误 =====")
             print(f"错误类型: {type(e)}")
@@ -695,7 +758,49 @@ if __name__ == "__main__":
         with open("user_information.txt", "w", encoding="utf-8") as file:
             file.write("用户关键信息表:user_information.txt")
         print(f"文件 '{"user_information.txt"}' 已创建")
-
+    
+    # 检查欢迎语音文件是否存在，不存在则生成
+    welcome_file_ready = False
+    if not os.path.exists("welcome.mp3"):
+        print("欢迎语音文件不存在，正在生成...")
+        welcome_file_ready = generate_welcome_audio()
+    else:
+        # 验证现有文件
+        try:
+            file_size = os.path.getsize("welcome.mp3")
+            if file_size < 100:  # 文件过小可能无效
+                print("现有欢迎语音文件可能无效，尝试重新生成...")
+                welcome_file_ready = generate_welcome_audio()
+            else:
+                welcome_file_ready = True
+        except Exception:
+            print("现有欢迎语音文件检查失败，尝试重新生成...")
+            welcome_file_ready = generate_welcome_audio()
+    
+    # 播放欢迎语音
+    if welcome_file_ready:
+        try:
+            print("正在播放欢迎语音...")
+            # 使用完整路径播放
+            full_path = os.path.abspath("welcome.mp3")
+            playsound(full_path)
+            print("欢迎语音播放完成")
+        except Exception as e:
+            print(f"播放欢迎语音失败: {str(e)}")
+            # 尝试使用text_to_speech作为备用方案
+            try:
+                print("尝试直接合成并播放欢迎语音...")
+                asyncio.run(text_to_speech("语音模式启动"))
+            except Exception as backup_error:
+                print(f"备用语音合成也失败: {str(backup_error)}")
+    else:
+        # 欢迎语音文件不就绪，使用临时TTS
+        try:
+            print("使用临时语音合成播放欢迎语音...")
+            asyncio.run(text_to_speech("语音模式启动"))
+        except Exception as e:
+            print(f"语音合成播放失败: {str(e)}")
+            
     print("程序启动成功")
     while True:
         try:
