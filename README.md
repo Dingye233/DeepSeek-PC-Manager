@@ -1,6 +1,6 @@
 # 基于大语言模型的智能助手
 
-这是一个基于DeepSeek大语言模型的个人智能助手系统，提供多种功能，包括文本交互、语音识别与合成、代码生成、邮件管理、天气查询等。系统支持两种运行模式：基础文本模式和完整语音模式，以及现代化的Web界面。
+这是一个基于DeepSeek大语言模型的个人智能助手系统，提供多种功能，包括文本交互、语音识别与合成、代码生成、邮件管理、天气查询等。系统支持两种运行模式：基础文本模式和完整语音模式
 
 ## 功能特点
 
@@ -113,15 +113,6 @@ python auto_setup.py
 
 ## 使用方法
 
-### Web界面（推荐）
-运行Web界面版本:
-```bash
-python web_ui.py
-```
-或双击`run_web.bat`
-
-Web界面将在 http://127.0.0.1:5000 启动，您可以通过浏览器访问。
-
 ### 基础版本 (无语音功能)
 运行基础版本:
 ```bash
@@ -226,25 +217,15 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 ├── auto_setup.py           # 自动安装配置脚本
 ├── aaaa.py                 # 完整版本(含语音功能)
 ├── deepseekAPI.py          # 基础版本(仅文本功能)
-├── web_ui.py               # Web界面版本
 ├── code_generator.py       # 代码生成核心功能
 ├── code_tools.py           # 代码工具接口层
-├── console_ui.py           # 控制台界面美化
 ├── python_tools.py         # Python辅助工具
 ├── get_email.py            # 邮件获取功能
 ├── send_email.py           # 邮件发送功能
 ├── ssh_controller.py       # SSH远程控制
 ├── user_information.txt    # 用户信息配置(可选)
-├── static/                 # Web静态资源
-│   ├── css/
-│   │   └── style.css       # Web界面样式
-│   └── js/
-│       └── main.js         # Web界面交互脚本
-├── templates/              # Web模板文件
-│   └── index.html          # Web主页
 ├── start_text_mode.bat     # 基础版本启动脚本
 ├── start_voice_mode.bat    # 完整版本启动脚本
-├── run_web.bat             # Web界面启动脚本
 └── code_generator_demo.bat # 代码工具示例脚本
 ```
 
@@ -258,23 +239,3 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 
 - Email: 1792491376@qq.com
 - GitHub: https://github.com/Dingye233/DeepSeek-PC-Manager
-
-## UI界面
-
-本项目提供简单的Web界面：
-
-### Web界面
-
-使用Flask和原生JavaScript构建的简洁Web界面，位于`templates`和`static`目录下。
-
-```bash
-python web_ui.py
-```
-
-或者可以使用提供的一键启动脚本：
-
-```bash
-start_web_only.bat
-```
-
-通过浏览器访问 http://localhost:5000 即可使用Web界面。
