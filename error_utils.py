@@ -32,7 +32,30 @@ def task_error_analysis(result, task_context):
     """
     分析工具执行结果中的错误，生成修复建议
     """
+    # 检查是否包含成功执行的标识
+    success_indicators = [
+        "命令执行成功",
+        "无输出",
+        "## 命令执行成功",
+        "执行成功"
+    ]
+    
+    for indicator in success_indicators:
+        if indicator in result:
+            # 如果包含成功标识，不判定为错误
+            return {"has_error": False}
+    
+    # 检查是否包含错误标识
     if "错误" in result or "Error" in result or "exception" in result.lower() or "failed" in result.lower():
+        # 排除特殊情况：git命令的正常输出
+        if "git" in task_context.get("args", {}).get("command", "").lower() and (
+            "Changes" in result or 
+            "branch" in result or 
+            "commit" in result
+        ):
+            # git命令的正常输出不应被判定为错误
+            return {"has_error": False}
+            
         error_analysis = parse_error_message(result)
         return {
             "has_error": True,
