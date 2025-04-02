@@ -9,6 +9,8 @@ import json
 import uuid
 import requests
 import os
+import tempfile
+from playsound import playsound
 
 from dotenv import load_dotenv
 
@@ -19,6 +21,9 @@ appid = os.environ.get('appid')
 access_token= os.environ.get('access_token')
 cluster = os.environ.get('cluster')
 
+# 检查是否有必要的环境变量
+if not appid or not access_token or not cluster:
+    print("警告: 未找到火山引擎TTS必要的环境变量 (appid, access_token, cluster)")
 
 voice_type1 = "BV064_streaming"
 host = "openspeech.bytedance.com"
@@ -49,7 +54,6 @@ request_json = {
         "operation": "query",
         "with_frontend": 1,
         "frontend_type": "unitTson"
-
     }
 }
 
@@ -61,31 +65,86 @@ def tts_volcano(text: str, voice_type: str = voice_type1) -> bytes:
     Returns:
         bytes: 音频二进制数据
     """
+    if not appid or not access_token or not cluster:
+        raise ValueError("缺少火山引擎TTS必要的环境变量，请检查.env文件")
+        
     request_json["audio"]["voice_type"] = voice_type
     request_json["request"]["text"] = text
     request_json["request"]["reqid"] = str(uuid.uuid4())
     
     try:
+        # 调试信息
+        print(f"正在调用火山引擎TTS API，文本长度: {len(text)} 字符")
+        
         resp = requests.post(api_url, json.dumps(request_json), headers=header)
         if resp.status_code != 200:
-            raise ValueError(f"API请求失败，状态码：{resp.status_code}")
+            error_msg = f"API请求失败，状态码：{resp.status_code}"
+            try:
+                error_data = resp.json()
+                if "message" in error_data:
+                    error_msg += f"，错误信息：{error_data['message']}"
+            except:
+                error_msg += f"，响应内容：{resp.text[:100]}"
+            raise ValueError(error_msg)
         
         resp_data = resp.json()
         if "data" not in resp_data:
-            raise ValueError(f"API返回异常：{resp_data.get('message', '未知错误')}")
+            error_msg = "API返回中未找到'data'字段"
+            if "message" in resp_data:
+                error_msg += f"，错误信息：{resp_data['message']}"
+            raise ValueError(error_msg)
             
-        return base64.b64decode(resp_data["data"])
-    except Exception as e:
+        audio_data = base64.b64decode(resp_data["data"])
+        print(f"成功获取音频数据，大小: {len(audio_data)} 字节")
+        return audio_data
+    except requests.exceptions.RequestException as e:
+        print(f"网络请求错误: {str(e)}")
+        raise
+    except ValueError as e:
         print(f"TTS合成失败: {str(e)}")
         raise
+    except Exception as e:
+        print(f"TTS合成未知错误: {str(e)}")
+        raise
+
+def tts_play(text: str, voice_type: str = voice_type1):
+    """合成并直接播放语音
+    Args:
+        text: 要合成的文本
+        voice_type: 音色类型
+    """
+    try:
+        audio_data = tts_volcano(text, voice_type)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+            temp_file = tmp.name
+            tmp.write(audio_data)
+        
+        playsound(temp_file)
+        
+        # 使用完后删除临时文件
+        try:
+            os.unlink(temp_file)
+        except:
+            pass
+        
+        return True
+    except Exception as e:
+        print(f"语音播放失败: {str(e)}")
+        return False
 
 if __name__ == '__main__':
     try:
-        resp = requests.post(api_url, json.dumps(request_json), headers=header)
-        print(f"resp body: \n{resp.json()}")
-        if "data" in resp.json():
-            data = resp.json()["data"]
-            file_to_save = open("test_submit.mp3", "wb")
-            file_to_save.write(base64.b64decode(data))
+        # 测试文本
+        test_text = "这是火山引擎语音合成的测试。"
+        
+        # 方法1: 获取音频数据并保存
+        audio_data = tts_volcano(test_text)
+        with open("test_submit.mp3", "wb") as file_to_save:
+            file_to_save.write(audio_data)
+        print("音频数据已保存到 test_submit.mp3")
+        
+        # 方法2: 直接播放
+        print("正在播放合成的语音...")
+        tts_play("播放测试成功。")
     except Exception as e:
-        e.with_traceback()
+        print(f"测试出错: {str(e)}")

@@ -60,10 +60,6 @@
    }
    ```
 
-## 示例
-
-参见 `code_tools_example.py` 文件，其中包含了所有工具的使用示例。
-
 ## 优势
 
 1. **安全性**：直接操作文件，避免通过shell执行命令可能带来的风险
@@ -75,7 +71,6 @@
 
 - `code_generator.py` - 核心功能实现
 - `code_tools.py` - 工具函数接口层
-- `code_tools_example.py` - 使用示例
 - `code_tools_README.md` - 使用说明文档
 
 ## 注意事项

@@ -45,7 +45,7 @@ def ssh_interactive_command(ip, username, password, initial_command):
 
         # 创建交互式shell
         shell = client.invoke_shell()
-        shell.settimeout(240)  # 设置命令执行超时
+        shell.settimeout(120)  # 设置命令执行超时
 
         # 等待shell初始化
         time.sleep(1)

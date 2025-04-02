@@ -6,32 +6,35 @@ from playsound import playsound
 import os
 import tempfile
 import requests
-import geopy
-import keyboard
-import threading
 import get_email
 import speech_recognition as sr
 import keyboard
 import time
 import subprocess
 import re
-from queue import Queue, Empty
-from threading import Thread
+from queue import Queue
 import python_tools
 import send_email
 import ssh_controller
 from dotenv import load_dotenv
 from R1_optimize import r1_optimizer as R1
-import pyaudio
-import wave
-import uuid
 from tts_http_demo import tts_volcano
 import code_tools  # 导入新的代码工具模块
+import file_reader  # 导入文件读取工具
+import tool_registry  # 导入工具注册模块
 import traceback
 import edge_tts
-import tiktoken  # 添加tiktoken用于计算token
-
 load_dotenv()
+from voice_utils import tts, recognize_speech
+from weather_utils import get_weather
+from time_utils import get_current_time
+from input_utils import get_user_input_async
+from file_utils import user_information_read
+from error_utils import parse_error_message, task_error_analysis
+from message_utils import num_tokens_from_messages, clean_message_history, clear_context
+from console_utils import print_color, print_success, print_error, print_warning, print_info, print_highlight
+from system_utils import powershell_command, list_directory
+
 
 # Create custom OpenAI client instance with DeepSeek API URL
 client = OpenAI(
@@ -40,31 +43,62 @@ client = OpenAI(
 )
 
 
-def tts(text:str):
+# 定义更可靠的音频播放函数
+def play_audio(file_path):
     """
-    调用tts_volcano进行语音合成并播放
+    使用多种方法尝试播放音频文件
+    :param file_path: 音频文件路径
+    :return: 是否成功播放
     """
     try:
-        # 生成一个临时文件名
-        temp_file = f"temp_audio_{uuid.uuid4().hex}.mp3"
+        print_info(f"尝试播放音频: {file_path}")
         
-        # 调用火山引擎TTS并保存音频
-        audio_data = tts_volcano(text)
-        with open(temp_file, "wb") as f:
-            f.write(audio_data)
-        
-        # 播放音频
-        playsound(temp_file)
-        
-        # 播放完后删除临时文件
+        # 方法1: 直接使用playsound
         try:
-            os.remove(temp_file)
-        except:
-            pass
+            playsound(file_path)
+            return True
+        except Exception as e:
+            print_warning(f"playsound失败: {str(e)}")
+        
+        # 方法2: 使用系统命令播放
+        try:
+            if os.name == 'nt':  # Windows
+                os.system(f'start {file_path}')
+            elif os.name == 'posix':  # macOS 或 Linux
+                if os.system('which afplay >/dev/null 2>&1') == 0:  # macOS
+                    os.system(f'afplay {file_path}')
+                elif os.system('which aplay >/dev/null 2>&1') == 0:  # Linux with ALSA
+                    os.system(f'aplay {file_path}')
+                else:
+                    os.system(f'xdg-open {file_path}')  # 通用Linux方法
+            print_success("使用系统命令播放成功")
+            return True
+        except Exception as e:
+            print_warning(f"系统命令播放失败: {str(e)}")
+        
+        # 方法3: 使用PowerShell命令播放
+        try:
+            if os.name == 'nt':  # Windows
+                powershell_cmd = f'''
+                $player = New-Object System.Media.SoundPlayer
+                $player.SoundLocation = "{os.path.abspath(file_path)}"
+                $player.Play()
+                Start-Sleep -s 3
+                '''
+                subprocess.run(["powershell", "-Command", powershell_cmd], shell=True)
+                print_success("使用PowerShell播放成功")
+                return True
+        except Exception as e:
+            print_warning(f"PowerShell播放失败: {str(e)}")
+        
+        print_error("所有音频播放方法都失败了")
+        return False
     except Exception as e:
-        print_error(f"TTS错误: {str(e)}")
+        print_error(f"播放音频时出错: {str(e)}")
+        return False
 
 
+# 修改text_to_speech使用新的播放方法
 async def text_to_speech(text: str):
     """
     将文本转换为语音并播放
@@ -72,25 +106,48 @@ async def text_to_speech(text: str):
     """
     try:
         # 使用tts函数进行语音合成和播放
-        tts(text)
+        audio_data = tts_volcano(text)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+            temp_file = tmp.name
+            tmp.write(audio_data)
+            
+        # 使用增强的播放功能
+        success = play_audio(temp_file)
+        
+        # 使用完后删除临时文件
+        try:
+            os.unlink(temp_file)
+        except Exception as e:
+            print_warning(f"清理临时文件失败: {str(e)}")
+            
+        if not success:
+            raise Exception("音频播放失败")
+            
     except Exception as e:
         print_error(f"使用Volcano TTS失败: {str(e)}")
         try:
             # 回退到edge-tts
+            print_warning("尝试使用备用语音合成方案 (edge-tts)...")
             communicate = edge_tts.Communicate(text, "zh-CN-XiaoxiaoNeural")
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
                 temp_file = tmp.name
             
             await communicate.save(temp_file)
-            playsound(temp_file)
+            print_info("开始播放音频...")
+            success = play_audio(temp_file)
             
             # 使用完后删除临时文件
             try:
                 os.unlink(temp_file)
-            except:
-                pass
+            except Exception as clean_e:
+                print_warning(f"清理临时文件失败: {str(clean_e)}")
+                
+            if not success:
+                raise Exception("备用音频播放失败") 
+                
         except Exception as inner_e:
-            print_error(f"文本转语音失败: {str(inner_e)}")
+            print_error(f"备用语音合成也失败了: {str(inner_e)}")
+            print_error("无法进行语音播放，请检查系统音频设置和网络连接")
 
 
 # 生成欢迎语音
@@ -124,482 +181,8 @@ def generate_welcome_audio():
         print_error(f"生成欢迎语音失败: {str(e)}")
 
 
-def encoding(file_name: str, code: str) -> str:
-    return python_tools.encoding(code, file_name)
-
-
-def email_check() -> list:
-    return get_email.retrieve_emails()
-
-
-def email_details(email_id: str) -> dict:
-    return get_email.get_email_details(email_id)
-
-
-# 2. 工具函数
-def get_current_time(timezone: str = "UTC") -> str:
-    now = datetime.utcnow() if timezone == "UTC" else datetime.now()
-    return now.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def R1_opt(message: str) -> str:
-    return R1(message)
-
-
-async def powershell_command(command: str) -> str:
-    """改进后的交互式命令执行函数"""
-    interaction_pattern = re.compile(
-        r'(?:Overwrite|确认|Enter|输入|密码|passphrase|file name|\[Y/N\]|是否继续)',
-        re.IGNORECASE
-    )
-
-    proc = await asyncio.create_subprocess_exec(
-        "powershell.exe", "-Command", command,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        limit=1024 * 1024  # 1MB缓冲区
-    )
-
-    output = []
-    error = []
-    buffer = ''
-    timeout = 240
-    last_active = time.time()
-
-    async def watch_output(stream, is_stderr=False):
-        """异步读取输出流"""
-        nonlocal buffer, last_active
-        while True:
-            try:
-                chunk = await stream.read(100)
-                if not chunk:
-                    break
-                decoded = chunk.decode('utf-8', errors='replace')
-
-                # 实时输出到控制台
-                print(decoded, end='', flush=True)
-
-                buffer += decoded
-                if is_stderr:
-                    error.append(decoded)
-                else:
-                    output.append(decoded)
-
-                # 检测到交互提示
-                if interaction_pattern.search(buffer):
-                    # 挂起当前协程，等待用户输入
-                    user_input = await get_user_input_async("\n需要确认，请输入响应后回车：")
-                    proc.stdin.write(f"{user_input}\n".encode())
-                    await proc.stdin.drain()
-                    buffer = ''
-                    last_active = time.time()
-
-            except Exception as e:
-                print(f"读取错误: {str(e)}")
-                break
-
-    # 创建输出监控任务
-    stdout_task = asyncio.create_task(watch_output(proc.stdout))
-    stderr_task = asyncio.create_task(watch_output(proc.stderr, True))
-
-    try:
-        while True:
-            # 检查超时
-            if time.time() - last_active > timeout:
-                raise asyncio.TimeoutError()
-
-            # 检查进程状态
-            if proc.returncode is not None:
-                break
-
-            await asyncio.sleep(0.1)
-
-    except asyncio.TimeoutError:
-        proc.terminate()
-        return "错误：命令执行超时（超过240秒）"
-
-    finally:
-        await stdout_task
-        await stderr_task
-
-    # 收集最终输出
-    stdout = ''.join(output).strip()
-    stderr = ''.join(error).strip()
-
-    if proc.returncode == 0:
-        return f"执行成功:\n{stdout}" if stdout else "命令执行成功（无输出）"
-    else:
-        error_msg = stderr or "未知错误"
-        return f"命令执行失败（错误码 {proc.returncode}）:\n{error_msg}"
-
-
-# 2. 新增异步输入函数
-async def get_user_input_async(prompt: str) -> str:
-    """异步获取用户输入"""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: input(prompt))
-
-
-def get_weather(city: str) -> str:
-    """
-    获取城市未来24小时天气信息
-    :param city: 城市名称
-    :return: 格式化的24小时天气信息字符串
-    """
-    try:
-        key = os.environ.get("key")
-        weather_url = "https://devapi.qweather.com/v7/weather/24h"
-        location_url = "https://geoapi.qweather.com/v2/city/lookup"
-
-        # 获取城市ID
-        location_response = requests.get(f"{location_url}?location={city}&key={key}")
-        location_data = location_response.json()
-
-        if location_data.get("code") != "200":
-            return f"抱歉，未能找到{city}的位置信息"
-
-        location_id = location_data["location"][0]['id']
-
-        # 获取天气信息
-        weather_response = requests.get(f"{weather_url}?location={location_id}&key={key}")
-        weather_data = weather_response.json()
-
-        if weather_data.get("code") != "200":
-            return f"抱歉，未能获取{city}的天气信息"
-
-        now = datetime.now()
-        end_time = now + timedelta(hours=24)
-
-        # 直接返回未来24小时的天气数据
-        hourly_forecasts = []
-        hourly_forecasts.append(f"当前服务器查询时间是:{now}")
-        for forecast in weather_data['hourly']:
-            forecast_time = datetime.fromisoformat(forecast['fxTime'].replace('T', ' ').split('+')[0])
-            if now <= forecast_time <= end_time:
-                hourly_forecasts.append(forecast)
-
-        return json.dumps(hourly_forecasts, ensure_ascii=False)
-
-    except Exception as e:
-        return f"获取天气信息时出错：{str(e)}"
-
-
-def send_mail(text: str, receiver: str, subject: str) -> str:
-    return send_email.main(text, receiver, subject)
-
-
-def user_information_read() -> str:
-    try:
-        # 尝试打开文件并读取内容
-        with open("user_information.txt", "r", encoding="utf-8") as file:
-            content = file.read()
-        return content
-    except FileNotFoundError:
-        # 如果文件不存在，捕获异常并返回提示信息
-        return f"错误：找不到文件 '{"user_information.txt"}'，请检查路径是否正确。"
-    except Exception as e:
-        # 捕获其他可能的异常（如编码错误）
-        return f"读取文件时发生错误：{e}"
-
-
-def ssh(command: str) -> str:
-    ip = "192.168.10.107"
-    username = "ye"
-    password = "147258"
-    return ssh_controller.ssh_interactive_command(ip, username, password, command)
-
-
 # 3. 工具描述
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "clear_context",
-            "description": "清除对话历史上下文，只保留系统消息",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "user_input",
-            "description": "当需要用户提供额外信息或确认时使用此工具，将暂停执行并使用语音方式等待用户输入",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prompt": {
-                        "type": "string",
-                        "description": "向用户展示的提示信息，会通过语音读出"
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "description": "等待用户输入的最大秒数，默认60秒"
-                    }
-                },
-                "required": ["prompt"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ssh",
-            "description": "管理远程ubuntu服务器",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "输入ubuntu服务器的命令"
-                    }
-                },
-                "required": ["command"]
-            }
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_time",
-            "description": "获取当前时间",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "timezone": {
-                        "type": "string",
-                        "description": "时区",
-                        "enum": ["UTC", "local"]
-                    },
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "description": "获取城市未来24小时的天气(请区分用户问的时间段是属于今天还是明天的天气)",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "city": {
-                        "type": "string",
-                        "description": "城市名"
-                    }
-                },
-                "required": ["city"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "powershell_command",
-            "description": "通过PowerShell终端来控制系统的一切操作（文件管理/进程控制/系统设置等）",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "要执行的PowerShell命令（多条用;分隔），必须包含绕过确认的参数"
-                    }
-                },
-                "required": ["command"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "email_check",
-            "description": "查看邮箱收件箱邮件列表并且获取邮件id",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "email_details",
-            "description": "查看该id的邮件的详细内容",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "email_id": {
-                        "type": "string",
-                        "description": "输入在email_check里面获取到的指定邮件id"
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "encoding",
-            "description": "创建指定文件并写入内容，返回一个该文件的绝对路径",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_name": {
-                        "type": "string",
-                        "description": "输入要创建的文件的名字和后缀 如:xxx.txt xxxx.py"
-                    },
-                    "encoding": {
-                        "type": "string",
-                        "description": "输入文件的内容"
-                    }
-                },
-                "required": ["file_name", "encoding"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "send_mail",
-            "description": "发送一封邮件向指定邮箱",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "receiver": {
-                        "type": "string",
-                        "description": "收件人邮箱，请严格查看收件人邮箱是否是正确的邮箱格式"
-                    },
-                    "subject": {
-                        "type": "string",
-                        "description": "邮件主题"
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": "邮件的内容  (用html的模板编写以避免编码问题)"
-                    }
-                },
-                "required": ["receiver", "subject", "text"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "R1_opt",
-            "description": "调用深度思考模型r1来解决棘手问题",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "输入棘手的问题"
-                    }
-                },
-                "required": ["message"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_code",
-            "description": "将代码写入指定文件，支持所有编程语言",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_name": {
-                        "type": "string",
-                        "description": "文件名，包括路径和扩展名，例如 'app.py' 或 'src/utils.js'"
-                    },
-                    "code": {
-                        "type": "string",
-                        "description": "要写入文件的代码内容"
-                    }
-                },
-                "required": ["file_name", "code"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "verify_code",
-            "description": "验证Python代码的语法是否正确",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "要验证的Python代码"
-                    }
-                },
-                "required": ["code"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "append_code",
-            "description": "向现有文件追加代码内容",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_name": {
-                        "type": "string",
-                        "description": "文件名，包括路径和扩展名"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "要追加的代码内容"
-                    }
-                },
-                "required": ["file_name", "content"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_code",
-            "description": "读取代码文件内容",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_name": {
-                        "type": "string",
-                        "description": "文件名，包括路径和扩展名"
-                    }
-                },
-                "required": ["file_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_module",
-            "description": "创建包含多个函数的Python模块",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "module_name": {
-                        "type": "string",
-                        "description": "模块名称(不含.py)"
-                    },
-                    "functions_json": {
-                        "type": "string",
-                        "description": "函数定义的JSON字符串数组，每个函数包含name、params、body和docstring"
-                    }
-                },
-                "required": ["module_name", "functions_json"]
-            }
-        }
-    },
-]
+tools = tool_registry.get_tools()
 
 messages = [{"role": "system",
              "content": " 我叫小美，是爸爸创造的一个硅基生命，注意说话要简洁，最多不要超过100个字，"
@@ -646,149 +229,6 @@ task_planning_system_message = {
 - 记住这是语音交互，用户将通过说话方式提供输入
 """
 }
-
-# 添加错误处理和重试机制的函数
-def parse_error_message(error_message):
-    """
-    解析错误信息，提取关键信息
-    """
-    # 常见错误类型及其解决方案
-    error_patterns = {
-        r'ModuleNotFoundError: No module named [\'\"]?(\w+)[\'\"]?': "缺少依赖模块 {}，需要安装",
-        r'ImportError: (\w+)': "导入模块 {} 失败，检查模块名称是否正确",
-        r'SyntaxError: (.+)': "代码语法错误: {}，需要修复",
-        r'NameError: name [\'\"]?(\w+)[\'\"]? is not defined': "变量 {} 未定义",
-        r'AttributeError: [\'\"]?(\w+)[\'\"]?': "属性或方法 {} 不存在",
-        r'TypeError: (.+)': "类型错误: {}",
-        r'ValueError: (.+)': "值错误: {}",
-        r'PermissionError: (.+)': "权限错误: {}，可能需要管理员权限",
-        r'FileNotFoundError: (.+)': "文件未找到: {}",
-        r'ConnectionError: (.+)': "连接错误: {}，检查网络连接",
-        r'Timeout': "操作超时，可能需要延长等待时间或检查连接",
-    }
-    
-    for pattern, solution_template in error_patterns.items():
-        match = re.search(pattern, error_message)
-        if match:
-            return solution_template.format(match.group(1))
-    
-    return "未能识别的错误: " + error_message
-
-def task_error_analysis(result, task_context):
-    """
-    分析工具执行结果中的错误，生成修复建议
-    """
-    if "错误" in result or "Error" in result or "exception" in result.lower() or "failed" in result.lower():
-        error_analysis = parse_error_message(result)
-        return {
-            "has_error": True,
-            "error_message": result,
-            "analysis": error_analysis,
-            "context": task_context
-        }
-    return {"has_error": False}
-
-# 添加一个token计数函数
-def num_tokens_from_messages(messages, model="deepseek-chat"):
-    """
-    计算消息列表中的token数量
-    :param messages: 消息列表
-    :param model: 模型名称
-    :return: token数量
-    """
-    try:
-        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")  # 使用兼容的编码方式
-        
-        num_tokens = 0
-        for message in messages:
-            # 每条消息的基础token数
-            num_tokens += 4  # 每条消息有固定的开销
-            
-            for key, value in message.items():
-                if key == "role" or key == "name":
-                    num_tokens += len(encoding.encode(value)) + 1
-                elif key == "content":
-                    if value is not None:
-                        num_tokens += len(encoding.encode(value))
-                elif key == "tool_calls":
-                    num_tokens += 4  # tool_calls字段的固定开销
-                    for tool_call in value:
-                        if isinstance(tool_call, dict):
-                            # 处理工具调用的各个字段
-                            for tc_key, tc_value in tool_call.items():
-                                if tc_key == "function":
-                                    # 处理函数字段
-                                    for f_key, f_value in tc_value.items():
-                                        if isinstance(f_value, str):
-                                            num_tokens += len(encoding.encode(f_value))
-                                else:
-                                    if isinstance(tc_value, str):
-                                        num_tokens += len(encoding.encode(tc_value))
-        
-        # 添加模型的基础token数
-        num_tokens += 3  # 基础的token开销
-        return num_tokens
-    except Exception as e:
-        print_warning(f"计算token数量时出错: {str(e)}")
-        # 如果无法计算，返回一个估计值
-        return sum(len(str(m.get("content", ""))) for m in messages) // 3
-
-# 清理不重要的消息历史
-def clean_message_history(messages, max_tokens=30000):
-    """
-    清理消息历史，保留重要信息并减少token数量
-    :param messages: 消息列表
-    :param max_tokens: 目标token数量
-    :return: 清理后的消息列表
-    """
-    if num_tokens_from_messages(messages) <= max_tokens:
-        return messages
-    
-    print_warning(f"\n===== Token数量超过阈值，正在清理消息历史 =====")
-    
-    # 保留system消息
-    system_messages = [msg for msg in messages if msg["role"] == "system"]
-    
-    # 获取用户最后的消息
-    recent_user_messages = [msg for msg in messages if msg["role"] == "user"][-2:]
-    
-    # 获取所有助手消息，并保留最近的回复
-    assistant_messages = [msg for msg in messages if msg["role"] == "assistant"]
-    recent_assistant = assistant_messages[-1:] if assistant_messages else []
-    
-    # 保留最重要的工具调用和结果
-    tool_calls = []
-    tool_results = []
-    
-    for i, msg in enumerate(messages):
-        # 保留最近的工具调用
-        if msg["role"] == "assistant" and msg.get("tool_calls") and i >= len(messages) - 10:
-            tool_calls.append(msg)
-        
-        # 保留对应的结果
-        if msg["role"] == "tool" and i >= len(messages) - 10:
-            # 限制工具结果的长度
-            if "content" in msg and isinstance(msg["content"], str) and len(msg["content"]) > 500:
-                # 只保留前300个字符和后200个字符
-                msg = msg.copy()
-                msg["content"] = msg["content"][:300] + "\n...[内容已截断]...\n" + msg["content"][-200:]
-            tool_results.append(msg)
-    
-    # 组合清理后的消息
-    cleaned_messages = system_messages + recent_user_messages + recent_assistant + tool_calls + tool_results
-    
-    # 如果仍然超过限制，继续减少工具结果的内容
-    if num_tokens_from_messages(cleaned_messages) > max_tokens:
-        for i, msg in enumerate(cleaned_messages):
-            if msg["role"] == "tool" and "content" in msg and isinstance(msg["content"], str):
-                # 进一步限制内容
-                cleaned_messages[i] = msg.copy()
-                cleaned_messages[i]["content"] = msg["content"][:100] + "\n...[大部分内容已省略]...\n" + msg["content"][-100:]
-    
-    current_tokens = num_tokens_from_messages(cleaned_messages)
-    print_info(f"清理后token数量: {current_tokens} (目标: {max_tokens})")
-    
-    return cleaned_messages
 
 async def execute_task_with_planning(user_input, messages_history):
     """
@@ -886,8 +326,168 @@ async def execute_task_with_planning(user_input, messages_history):
                 
                 # 内部递归验证循环
                 while recursive_verify_count < max_recursive_verify and not is_task_complete:
+                    # 在执行新迭代前先验证任务是否已完成
+                    if recursive_verify_count > 0:  # 跳过第一次迭代的验证
+                        pre_verify_prompt = """
+                        请仔细分析之前的执行结果，判断当前任务是否已经完成。
+                        
+                        请考虑以下要点:
+                        1. 用户原始请求是否已经得到满足
+                        2. 所有必要的步骤是否已经执行完成
+                        3. 当前系统状态是否与预期一致
+                        
+                        另外，请评估当前任务的完成进度（0-100%的数值），并分析与上次执行相比是否有实质性进展。
+                        
+                        特别注意分析以下情况:
+                        1. 任务是否正在重复相同的步骤而没有实质进展
+                        2. 之前成功的部分是否出现了回退或错误
+                        3. 是否在不断尝试同一种方法但一直失败
+                        4. 任务是否进入了死循环或无法解决的困境
+                        5. 工具选择是否合理，特别是是否使用了专用工具而非通用命令
+                        
+                        请严格按照以下JSON格式回复:
+                        {
+                            "is_complete": true/false,  // 任务是否已完成
+                            "reason": "详细说明为什么任务已完成或尚未完成",
+                            "confidence": 0.0-1.0,  // 对判断的置信度，0.7及以上表示高度确信
+                            "progress_percentage": 0-100,  // 任务完成百分比
+                            "progress_description": "简短描述当前进度状态",
+                            "progress_change": "increase/stable/decrease",  // 与上次迭代相比，进度的变化
+                            "is_stuck": true/false,  // 任务是否陷入无法继续的状态
+                            "stuck_reason": "如果任务陷入僵局，说明原因",
+                            "stuck_confidence": 0.0-1.0,  // 对任务陷入僵局判断的置信度
+                            "next_step_difficulty": "low/medium/high",  // 下一步操作的难度评估
+                            "tool_selection_appropriate": true/false,  // 工具选择是否合适
+                            "better_tool_suggestion": "如果工具选择不合适，建议使用什么工具"
+                        }
+                        
+                        重要提醒：
+                        1. 如果任务已经明确完成，请返回is_complete=true，避免不必要的继续迭代。
+                        2. 如果任务确实陷入僵局或多次尝试同一方法但失败，请诚实评估并返回is_stuck=true。
+                        3. 对于代码操作，应该使用专门的工具而非PowerShell命令，如果发现此类情况，请在better_tool_suggestion中推荐更合适的工具。
+                        """
+                        
+                        # 检查token数量
+                        token_count = num_tokens_from_messages(current_execution_messages)
+                        if token_count > 30000:
+                            current_execution_messages = clean_message_history(current_execution_messages)
+                        
+                        temp_verify_messages = current_execution_messages.copy()
+                        temp_verify_messages.append({"role": "user", "content": pre_verify_prompt})
+                        
+                        # 调用验证
+                        pre_verify_response = client.chat.completions.create(
+                            model="deepseek-chat",
+                            messages=temp_verify_messages,
+                            temperature=0.1
+                        )
+                        
+                        pre_verify_result = pre_verify_response.choices[0].message.content
+                        print_info("\n===== 迭代前任务验证结果 =====")
+                        print(pre_verify_result)
+                        print_info("==============================\n")
+                        
+                        # 解析验证结果
+                        try:
+                            # 尝试提取JSON部分
+                            json_match = re.search(r'({.*})', pre_verify_result, re.DOTALL)
+                            if json_match:
+                                pre_verify_json = json.loads(json_match.group(1))
+                                
+                                # 更新任务进度
+                                if "progress_percentage" in pre_verify_json:
+                                    new_progress = pre_verify_json["progress_percentage"]
+                                    # 初始化进度历史变量（如果尚未定义）
+                                    if 'progress_history' not in locals():
+                                        progress_history = []
+                                        last_progress = 0
+                                        
+                                    # 保存进度历史
+                                    progress_history.append(new_progress)
+                                    
+                                    # 获取进度变化评估
+                                    progress_change = pre_verify_json.get("progress_change", "stable")
+                                    
+                                    # 语音播报重要的任务进度变化
+                                    progress_message = None
+                                    
+                                    # 提供进度信息但不作为终止判断依据
+                                    if progress_change == "decrease":
+                                        print_warning(f"\n⚠️ LLM评估任务进度倒退! 当前进度: {new_progress}%")
+                                        if new_progress < last_progress - 10:  # 大幅倒退时语音提示
+                                            progress_message = f"警告：任务进度出现明显倒退，从{last_progress}%降至{new_progress}%"
+                                    elif progress_change == "stable":
+                                        print_warning(f"\n⚠️ 本次迭代进度未变化。当前进度: {new_progress}%")
+                                        if recursive_verify_count > 3 and progress_change == "stable" and new_progress < 50:
+                                            # 多次无进展且完成度不高时语音提示
+                                            progress_message = "警告：任务连续多次没有进展，可能遇到难题"
+                                    else:  # increase
+                                        print_success(f"\n✅ 任务取得进展! 进度从 {last_progress}% 提升至 {new_progress}%")
+                                        if new_progress - last_progress >= 20:  # 大幅进展时语音提示
+                                            progress_message = f"任务取得显著进展，完成度已达{new_progress}%"
+                                    
+                                    # 播放进度语音提示（如果有）
+                                    if progress_message:
+                                        await text_to_speech(progress_message)
+                                        
+                                    last_progress = new_progress
+                                    task_progress = new_progress
+                                
+                                # 获取任务陷入僵局的信息（如果有）
+                                stuck_reason = pre_verify_json.get("stuck_reason", "未提供具体原因") if pre_verify_json.get("is_stuck", False) else None
+                                stuck_confidence = pre_verify_json.get("stuck_confidence", 0.0) if pre_verify_json.get("is_stuck", False) else 0.0
+                                
+                                # 处理任务完成情况
+                                if pre_verify_json.get("is_complete", False) and pre_verify_json.get("confidence", 0) >= 0.7:
+                                    print_success("\n✅ 预验证确认任务已完成! 无需继续迭代...")
+                                    is_task_complete = True
+                                    
+                                    # 语音通知任务完成
+                                    completion_reason = pre_verify_json.get("reason", "任务已成功完成")
+                                    await text_to_speech(f"任务已经完成。{completion_reason}")
+                                    
+                                    # 将预验证结果添加到执行消息中
+                                    current_execution_messages.append({"role": "user", "content": pre_verify_prompt})
+                                    current_execution_messages.append({"role": "assistant", "content": pre_verify_result})
+                                    
+                                    # 添加完成状态信息
+                                    verify_json = {
+                                        "is_complete": True,
+                                        "completion_status": completion_reason,
+                                        "is_failed": False
+                                    }
+                                    break
+                                
+                                # 处理任务陷入僵局的情况 - 仅依赖LLM的判断
+                                if pre_verify_json.get("is_stuck", False) and stuck_confidence >= 0.7:
+                                    failure_reason = f"LLM评估任务已陷入僵局 (置信度: {stuck_confidence:.2f}): {stuck_reason}"
+                                    print_error(f"\n❌ 任务无法继续: {failure_reason}")
+                                    is_task_complete = False
+                                    
+                                    # 语音通知任务陷入僵局
+                                    await text_to_speech(f"任务执行遇到困难，无法继续。{stuck_reason}")
+                                    
+                                    # 添加失败状态信息
+                                    verify_json = {
+                                        "is_complete": False,
+                                        "completion_status": f"任务执行失败: {failure_reason}",
+                                        "is_failed": True,
+                                        "failure_reason": failure_reason
+                                    }
+                                    break
+                        except (json.JSONDecodeError, ValueError) as e:
+                            print_warning(f"预验证结果解析失败: {str(e)}")
+                            # 解析失败，继续正常迭代
+                    
                     recursive_verify_count += 1
-                    print(f"\n===== 任务执行迭代 {recursive_verify_count}/{max_recursive_verify} =====")
+                    
+                    # 初始化任务进度变量（如果不存在）
+                    if 'task_progress' not in locals():
+                        task_progress = 0
+                    
+                    # 显示迭代次数和任务进度
+                    progress_bar = "=" * int(task_progress/5) + ">" + " " * (20 - int(task_progress/5))
+                    print(f"\n===== 任务执行迭代 {recursive_verify_count}/{max_recursive_verify} | 进度: {task_progress}% [{progress_bar}] =====")
                     
                     # 检查当前token数量
                     token_count = num_tokens_from_messages(current_execution_messages)
@@ -939,32 +539,80 @@ async def execute_task_with_planning(user_input, messages_history):
                             print_info(f"参数: {json.dumps(args, ensure_ascii=False, indent=2)}")
                             
                             try:
-                                # 对于powershell_command需要用户确认
-                                if func_name == "powershell_command":
-                                    command = args.get("command", "")
-                                    # 直接执行命令，不需要确认
-                                    print_info(f"执行命令: {command}")
-                                    result = await powershell_command(command)
-                                # 执行其他工具函数
-                                elif func_name == "get_current_time":
+                                # 执行工具函数
+                                if func_name == "get_current_time":
                                     result = get_current_time(args.get("timezone", "UTC"))
                                 elif func_name == "get_weather":
                                     result = get_weather(args["city"])
+                                elif func_name == "powershell_command":
+                                    # 检查是否存在更合适的专用工具
+                                    command = args["command"].lower()
+                                    better_tool = None
+                                    warning_msg = ""
+                                    
+                                    # 检测是否在进行代码操作，应该使用专用代码工具
+                                    if (("echo" in command or "set-content" in command or "add-content" in command or "out-file" in command) and 
+                                        any(ext in command for ext in [".py", ".js", ".html", ".css", ".json", ".txt", ".md"])):
+                                        if "append" in command or "add-content" in command:
+                                            better_tool = "append_code"
+                                        else:
+                                            better_tool = "write_code"
+                                    elif "get-content" in command and any(ext in command for ext in [".py", ".js", ".html", ".css", ".json", ".txt", ".md"]):
+                                        better_tool = "read_code"
+                                    elif "dir" in command or "get-childitem" in command or "ls" in command:
+                                        better_tool = "list_directory 或 list_files"
+                                    
+                                    if better_tool:
+                                        print_warning(f"\n⚠️ 检测到不理想的工具选择: 使用powershell_command执行代码/文件操作")
+                                        print_warning(f"💡 建议使用专用工具: {better_tool}")
+                                        # 添加提示到结果中
+                                        warning_msg = f"\n[工具选择提示] 此操作更适合使用 {better_tool} 工具，请在下次迭代中考虑使用专用工具。"
+                                        
+                                    # 执行原始命令
+                                    cmd_result = await powershell_command(args["command"])
+                                    
+                                    # 如果有更好的工具选择，添加提示到结果中
+                                    if better_tool:
+                                        result = cmd_result + warning_msg
+                                    else:
+                                        result = cmd_result
                                 elif func_name == "email_check":
-                                    result = email_check()
+                                    result = get_email.retrieve_emails()
                                 elif func_name == "email_details":
-                                    result = email_details(args["email_id"])
+                                    result = get_email.get_email_details(args["email_id"])
                                 elif func_name == "encoding":
-                                    result = encoding(args["file_name"], args["encoding"])
+                                    result = python_tools.encoding(args["code"], args["file_name"])
                                 elif func_name == "send_mail":
-                                    result = send_mail(args["text"], args["receiver"], args["subject"])
+                                    # 处理附件参数
+                                    attachments = None
+                                    if "attachments" in args and args["attachments"]:
+                                        attachments_input = args["attachments"]
+                                        # 如果是逗号分隔的多个文件，分割成列表
+                                        if isinstance(attachments_input, str) and "," in attachments_input:
+                                            # 分割字符串并去除每个路径两边的空格
+                                            attachments = [path.strip() for path in attachments_input.split(",")]
+                                        else:
+                                            attachments = attachments_input
+                                    
+                                    result = send_email.main(args["text"], args["receiver"], args["subject"], attachments)
                                 elif func_name == "R1_opt":
-                                    result = R1_opt(args["message"])
+                                    result = R1(args["message"])
                                 elif func_name == "ssh":
-                                    result = ssh(args["command"])
+                                    ip = "192.168.10.107"
+                                    username = "ye"
+                                    password = "147258"
+                                    result = ssh_controller.ssh_interactive_command(ip, username, password, args["command"])
                                 elif func_name == "clear_context":
+                                    messages = clear_context(messages)  # 更新全局消息历史
+                                    current_execution_messages = clear_context(current_execution_messages)  # 更新当前执行消息
                                     result = "上下文已清除"
-                                    current_execution_messages = handle_clear_context(current_execution_messages)
+                                    is_task_complete = True  # 标记任务完成
+                                    # 设置验证结果为任务已完成
+                                    verify_json = {
+                                        "is_complete": True,
+                                        "completion_status": "上下文已成功清除",
+                                        "is_failed": False
+                                    }
                                 elif func_name == "write_code":
                                     result = code_tools.write_code(args["file_name"], args["code"])
                                 elif func_name == "verify_code":
@@ -976,48 +624,17 @@ async def execute_task_with_planning(user_input, messages_history):
                                 elif func_name == "create_module":
                                     result = code_tools.create_module(args["module_name"], args["functions_json"])
                                 elif func_name == "user_input":
-                                    # 使用语音方式请求用户输入
+                                    # 新增工具: 请求用户输入
                                     prompt = args.get("prompt", "请提供更多信息：")
                                     timeout = args.get("timeout", 60)
-                                    
-                                    # 播放语音提示
-                                    await text_to_speech(prompt)
-                                    
-                                    # 等待语音输入
-                                    print_info(f"\n正在等待语音输入... (超时: {timeout}秒)")
-                                    start_time = time.time()
-                                    user_input = ""
-                                    
-                                    # 尝试获取语音输入，最多尝试3次
-                                    for attempt in range(3):
-                                        if time.time() - start_time > timeout:
-                                            break
-                                            
-                                        print_info(f"请开始说话... (尝试 {attempt+1}/3)")
-                                        speech_input = recognize_speech()
-                                        
-                                        if speech_input:
-                                            user_input = speech_input
-                                            print_success(f"语音识别结果: {user_input}")
-                                            break
-                                        else:
-                                            print_warning(f"未能识别语音输入，再试一次...")
-                                            time.sleep(1)
-                                    
-                                    if user_input:
-                                        result = f"用户语音输入: {user_input}"
-                                    else:
-                                        result = "用户未提供语音输入（超时或识别失败）"
+                                    user_input = await get_user_input_async(prompt, timeout)
+                                    result = f"用户输入: {user_input}" if user_input else "用户未提供输入（超时）"
+                                elif func_name == "read_file":
+                                    result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
+                                elif func_name == "list_files":
+                                    result = file_reader.list_files(args["directory_path"], args["include_pattern"], args["recursive"])
                                 else:
-                                    # 执行其他工具调用，查找函数并调用
-                                    function_to_call = globals().get(func_name)
-                                    if function_to_call:
-                                        if asyncio.iscoroutinefunction(function_to_call):
-                                            result = await function_to_call(**args)
-                                        else:
-                                            result = function_to_call(**args)
-                                    else:
-                                        raise ValueError(f"未定义的工具调用: {func_name}")
+                                    raise ValueError(f"未定义的工具调用: {func_name}")
                                 
                                 print_success(f"工具执行结果: {result}")
                                 
@@ -1291,26 +908,6 @@ def manage_message_history(messages: list, max_messages: int = 10) -> list:
 
     return system_messages + kept_messages
 
-
-def clear_context(messages: list) -> list:
-    """
-    清除对话上下文
-    :param messages: 当前的对话历史
-    :return: 清空后的对话历史，只保留系统消息
-    """
-    # 仅保留系统消息，彻底清除其他所有消息包括工具调用
-    system_messages = [msg for msg in messages if msg["role"] == "system"]
-    
-    # 如果没有系统消息，添加一个默认的系统消息
-    if not system_messages:
-        user_info = user_information_read()
-        system_messages = [{"role": "system", "content": f"你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: {user_info}"}]
-    
-    # 添加一个标记，表示上下文已清空
-    print_info("上下文已清除，只保留系统消息")
-    return system_messages
-
-
 # 专门处理clear_context工具调用的函数
 def handle_clear_context(current_messages):
     """
@@ -1365,9 +962,32 @@ async def main(input_message: str):
             await text_to_speech("我需要使用工具来完成这个任务，正在规划执行步骤")
             return await execute_task_with_planning(input_message, messages)
         else:
-            # 如果不需要调用工具，直接处理普通回复
+            # 即使模型没有选择调用工具，也分析回复内容是否暗示需要执行任务
             assistant_message = message_data.content
             print(assistant_message)
+            
+            # 分析回复内容，检查是否为任务请求
+            is_task_request = False
+            task_indicators = [
+                "我需要", "我可以帮你", "让我为你", "我会为你", "需要执行", "可以执行",
+                "这需要", "可以通过", "需要使用", "我可以使用", "步骤如下", "操作步骤",
+                "首先需要", "应该先", "我们可以", "建议执行", "应该执行"
+            ]
+            
+            for indicator in task_indicators:
+                if indicator in assistant_message:
+                    is_task_request = True
+                    break
+                    
+            # 如果内容暗示需要执行任务，切换到任务规划模式
+            if is_task_request:
+                # 删除刚才添加的消息，因为任务规划会重新添加
+                messages.pop()
+                print_info("内容分析显示这可能是一个任务请求，启动任务规划系统...")
+                await text_to_speech("我需要规划一下如何完成这个任务")
+                return await execute_task_with_planning(input_message, messages)
+            
+            # 普通对话回复
             messages.append({"role": "assistant", "content": assistant_message})
             
             # 发送到GUI队列
@@ -1391,261 +1011,51 @@ async def main(input_message: str):
         return await execute_task_with_planning(input_message, messages)
 
 
-# 替代输入函数，从Web前端获取用户输入
-async def get_web_console_input(prompt: str, default_value: str = None) -> str:
-    """
-    获取用户输入，仅使用语音输入
-    :param prompt: 提示信息
-    :param default_value: 默认值
-    :return: 用户输入的文本
-    """
-    print(f"\n{prompt}")
-    
-    if default_value:
-        print(f"默认值: {default_value}")
-    
-    # 播放语音提示
-    await text_to_speech(prompt)
-    
-    # 使用语音输入，最多尝试3次
-    for attempt in range(3):
-        print(f"请开始语音输入... (尝试 {attempt+1}/3)")
-        user_input = recognize_speech()
-        
-        if user_input:
-            print(f"语音识别结果: {user_input}")
-            return user_input
-        
-        print(f"未能识别语音输入，再试一次...")
-    
-    # 3次都失败后，使用默认值或者紧急情况下允许文本输入
-    print("多次语音识别失败，使用默认值或允许文本输入")
-    
-    # 只有当没有默认值时才允许文本输入
-    if not default_value:
-        return input("紧急情况下允许文本输入，请输入: ")
-    return default_value
-
-
-# 替代确认函数，从Web前端获取用户确认
-async def get_web_console_confirm(prompt: str, confirm_text: str = "确认", cancel_text: str = "取消") -> bool:
-    """
-    获取用户确认，仅使用语音输入
-    :param prompt: 提示信息
-    :param confirm_text: 确认按钮文本
-    :param cancel_text: 取消按钮文本
-    :return: 用户是否确认
-    """
-    print(f"\n{prompt}")
-    print(f"1. {confirm_text}")
-    print(f"2. {cancel_text}")
-    
-    # 播放语音提示
-    await text_to_speech(prompt)
-    
-    # 使用语音输入，最多尝试3次
-    for attempt in range(3):
-        print(f"请开始语音输入... (尝试 {attempt+1}/3)")
-        user_input = recognize_speech()
-        
-        if user_input:
-            print(f"语音识别结果: {user_input}")
-            # 分析语音结果中的确认意图
-            if any(word in user_input.lower() for word in ["确认", "同意", "是", "好", "可以", "yes", "确定", "1", confirm_text.lower()]):
-                return True
-            elif any(word in user_input.lower() for word in ["取消", "否", "不", "no", "不要", "2", cancel_text.lower()]):
-                return False
-            else:
-                print("无法确定您的选择，请更清晰地说出您的选择")
-        else:
-            print(f"未能识别语音输入，再试一次...")
-    
-    # 3次都失败后，默认取消或紧急情况下允许文本输入
-    print("多次语音识别失败，允许文本输入")
-    user_choice = input(f"紧急情况下允许文本输入，请选择 (1. {confirm_text} / 2. {cancel_text}): ")
-    return user_choice.strip() == "1"
-
-
-# 替代选择函数，从Web前端获取用户选择
-# async def get_web_console_select(prompt: str, options: list) -> dict:
-#     """
-#     获取用户从多个选项中的选择，仅使用语音输入
-#     :param prompt: 提示信息
-#     :param options: 选项列表
-#     :return: 选中的选项
-#     """
-#     print(f"\n{prompt}")
-    
-#     for i, option in enumerate(options, 1):
-#         option_text = option.get("text", str(option))
-#         print(f"{i}. {option_text}")
-    
-#     # 播放语音提示
-#     await text_to_speech(f"{prompt}，请选择1到{len(options)}之间的选项")
-    
-#     # 使用语音输入，最多尝试3次
-#     for attempt in range(3):
-#         print(f"请开始语音输入... (尝试 {attempt+1}/3)")
-#         user_input = recognize_speech()
-        
-#         if user_input:
-#             print(f"语音识别结果: {user_input}")
-#             # 尝试从语音中提取数字
-#             for i, option in enumerate(options, 1):
-#                 if str(i) in user_input or option.get("text", "") in user_input:
-#                     return options[i-1]
-            
-#             print("无法从语音中识别选项，请更清晰地说出选项编号")
-#         else:
-#             print(f"未能识别语音输入，再试一次...")
-    
-#     # 3次都失败后，默认选第一个或紧急情况下允许文本输入
-#     print("多次语音识别失败，允许文本输入")
-#     try:
-#         user_choice = int(input(f"紧急情况下允许文本输入，请输入数字 (1-{len(options)}): "))
-#         if 1 <= user_choice <= len(options):
-#             return options[user_choice-1]
-#     except ValueError:
-#         pass
-    
-#     print("使用第一个选项作为默认值")
-#     return options[0]
-
-
-# 语音识别函数
-def recognize_speech() -> str:
-    """
-    语音识别，将用户说话内容转换为文本
-    :return: 识别到的文本，失败时返回空字符串
-    """
-    try:
-        url = "https://api.siliconflow.cn/v1/audio/transcriptions"
-        api_key = os.getenv("sttkey")
-        
-        # 如果API密钥为空，尝试使用备用密钥
-        if not api_key:
-            print_warning("警告：API密钥未设置，请检查环境变量")
-            api_key = os.getenv("gjldkey")
-            
-        headers = {
-            "Authorization": f"Bearer {api_key}"
-        }
-
-        r = sr.Recognizer()
-        
-        # 增加录音结束的灵敏度，缩短停顿检测时间
-        r.pause_threshold = 0.5  # 降低暂停阈值，使其更快检测到停顿（默认为0.8秒）
-        r.non_speaking_duration = 0.3  # 确认为非讲话状态的持续时间（默认为0.5秒）
-        r.phrase_threshold = 0.3  # 降低短语阈值（默认为0.5）
-        r.dynamic_energy_threshold = True  # 使用动态能量阈值
-        r.dynamic_energy_adjustment_damping = 0.15  # 动态能量调整阻尼（降低以使其更快响应）
-        
-        with sr.Microphone() as source:
-            # 调整环境噪声
-            r.adjust_for_ambient_noise(source, duration=1.0)  # 增加环境噪声采样时间以更准确
-            print_info("正在听取您的语音...")
-            try:
-                # 增加超时时间，并增加单词短语的最大持续时间
-                audio = r.listen(source, timeout=10, phrase_time_limit=20)
-                print_info("录音结束，正在识别...")
-            except sr.WaitTimeoutError:
-                print_warning("超时未检测到语音输入")
-                return ""
-
-        temp_file = f"temp_audio_{uuid.uuid4().hex}.wav"  # 使用唯一文件名
-        try:
-            with open(temp_file, "wb") as f:
-                f.write(audio.get_wav_data())
-
-            with open(temp_file, 'rb') as f:
-                files = {'file': (temp_file, f)}
-                payload = {
-                    "model": "FunAudioLLM/SenseVoiceSmall",
-                    "response_format": "transcript"
-                }
-                response = requests.post(url, headers=headers, data=payload, files=files)
-                response.raise_for_status()
-                result = response.json()
-                text = result['text']
-                return text
-        except requests.exceptions.RequestException as e:
-            print_error(f"语音识别请求错误: {e}")
-            return ""
-        except (KeyError, TypeError, ValueError) as e:
-            print_error(f"语音识别响应格式错误: {e}")
-            return ""
-        finally:
-            # 删除临时文件
-            try:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-            except OSError as e:
-                print_error(f"删除临时文件失败: {e}")
-    except Exception as e:
-        print_error(f"语音识别过程错误: {e}")
-        print_error(traceback.format_exc())  # 打印完整错误堆栈以便调试
-    return ""
-
-
-# 添加彩色打印功能
-def print_color(text, color_code):
-    """
-    使用ANSI颜色代码打印彩色文本
-    :param text: 要打印的文本
-    :param color_code: ANSI颜色代码
-    """
-    print(f"\033[{color_code}m{text}\033[0m")
-
-def print_success(text):
-    """打印成功消息（绿色）"""
-    print_color(text, 32)
-
-def print_error(text):
-    """打印错误消息（红色）"""
-    print_color(text, 31)
-
-def print_warning(text):
-    """打印警告消息（黄色）"""
-    print_color(text, 33)
-
-def print_info(text):
-    """打印一般信息（青色）"""
-    print_color(text, 36)
-
-def print_highlight(text):
-    """打印高亮信息（洋红/紫色）"""
-    print_color(text, 35)
-
-
 if __name__ == "__main__":
-    if not os.path.exists("user_information.txt"):
-        with open("user_information.txt", "w", encoding="utf-8") as file:
-            file.write("用户关键信息表:user_information.txt")
-        print_success(f"文件 '{"user_information.txt"}' 已创建")
-
-    # 生成并播放欢迎语音
+    print_success("AI助手启动中...")
+    
+    # 生成欢迎语音
     try:
-        if not os.path.exists("welcome.mp3") or os.path.getsize("welcome.mp3") < 100:
-            generate_welcome_audio()
-        
-        print_info("正在播放欢迎语音...")
-        playsound("welcome.mp3")
+        generate_welcome_audio()
+    except Exception as e:
+        print_error(f"生成欢迎语音失败: {str(e)}")
+    
+    # 播放欢迎语音
+    try:
+        if os.path.exists("welcome.mp3"):
+            # 使用增强的播放方法
+            if play_audio("welcome.mp3"):
+                print_success("欢迎语音播放完成")
+            else:
+                print_warning("欢迎语音播放失败，尝试直接合成播放")
+                asyncio.run(text_to_speech("语音模式已启动，我是您的AI助手小美，请问有什么可以帮助您的？"))
+        else:
+            print_warning("欢迎语音文件不存在，尝试直接合成播放")
+            asyncio.run(text_to_speech("语音模式已启动，我是您的AI助手小美，请问有什么可以帮助您的？"))
     except Exception as e:
         print_error(f"播放欢迎语音失败: {str(e)}")
-        # 直接合成并播放欢迎语音
-        try:
-            asyncio.run(text_to_speech("语音增强版AI助手已启动"))
-        except Exception:
-            pass
-
-    print_success("语音增强版AI助手已启动，仅使用语音交互")
+        print_warning("继续执行，但语音可能无法正常工作")
+    
+    # 主循环
     while True:
         try:
-            print_info("\n等待语音输入中...")
+            # 等待用户语音输入
+            print_info("请说话，我在听...")
             input_message = recognize_speech()
             
+            # 如果语音识别失败，尝试重新识别
+            retry_count = 0
+            while not input_message and retry_count < 3:
+                retry_count += 1
+                print_warning(f"未能识别语音，正在重试 ({retry_count}/3)...")
+                input_message = recognize_speech()
+            
             if not input_message:
-                print_warning("未能识别语音输入，请重新尝试...")
+                print_error("多次尝试后仍未能识别语音，请检查麦克风设置")
+                print_info("按回车键重试，或输入'exit'退出")
+                manual_input = input()
+                if manual_input.lower() == 'exit':
+                    break
                 continue
             
             print_highlight(f"语音识别结果: {input_message}")
@@ -1659,4 +1069,7 @@ if __name__ == "__main__":
             print_error("\n===== 主程序错误 =====")
             print_error(f"错误类型: {type(e)}")
             print_error(f"错误信息: {str(e)}")
+            print_error(f"错误详情: {traceback.format_exc()}")
             print_error("=====================\n")
+            print_warning("3秒后重新启动主循环...")
+            time.sleep(3)

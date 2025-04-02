@@ -5,9 +5,37 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1c3a9118-83e2-4649-a0d9-60f95eae1c46" name="更改" comment="">
+      <change afterPath="$PROJECT_DIR$/api_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/console_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/error_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/file_reader.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/file_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/input_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/message_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/system_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/time_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tool_registry.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/voice_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/weather_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/start.bat" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/R1_optimize.py" beforeDir="false" afterPath="$PROJECT_DIR$/R1_optimize.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/aaaa.py" beforeDir="false" afterPath="$PROJECT_DIR$/aaaa.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/auto_setup.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/code_generator.py" beforeDir="false" afterPath="$PROJECT_DIR$/code_generator.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/code_tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/code_tools.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/code_tools_README.md" beforeDir="false" afterPath="$PROJECT_DIR$/code_tools_README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/deepseekAPI.py" beforeDir="false" afterPath="$PROJECT_DIR$/deepseekAPI.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/empty_test_file.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/handwriting_model.h5" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/handwriting_recognition.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/handwriting_recognition_report.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/mnist_training.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/send_email.py" beforeDir="false" afterPath="$PROJECT_DIR$/send_email.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ssh_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ssh_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tts_http_demo.py" beforeDir="false" afterPath="$PROJECT_DIR$/tts_http_demo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/welcome.mp3" beforeDir="false" afterPath="$PROJECT_DIR$/welcome.mp3" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -47,38 +75,38 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "JavaScript 调试.snake_game.html.executor": "Run",
-    "PowerShell.log_errors.ps1.executor": "Run",
-    "Python.2.executor": "Run",
-    "Python.R1_optimize.executor": "Run",
-    "Python.aaaa.executor": "Run",
-    "Python.attack.executor": "Run",
-    "Python.broswer.executor": "Run",
-    "Python.browser.executor": "Run",
-    "Python.browser_agent.executor": "Run",
-    "Python.browser_agent_v2.executor": "Run",
-    "Python.deepseekAPI.executor": "Run",
-    "Python.example.executor": "Run",
-    "Python.python_tools.executor": "Run",
-    "Python.send_email.executor": "Run",
-    "Python.snake_game.executor": "Run",
-    "Python.ssh_controller.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "git-widget-placeholder": "<未知>",
-    "last_opened_file_path": "D:/PC-Agent-V1",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;JavaScript 调试.snake_game.html.executor&quot;: &quot;Run&quot;,
+    &quot;PowerShell.log_errors.ps1.executor&quot;: &quot;Run&quot;,
+    &quot;Python.2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.R1_optimize.executor&quot;: &quot;Run&quot;,
+    &quot;Python.aaaa.executor&quot;: &quot;Run&quot;,
+    &quot;Python.attack.executor&quot;: &quot;Run&quot;,
+    &quot;Python.broswer.executor&quot;: &quot;Run&quot;,
+    &quot;Python.browser.executor&quot;: &quot;Run&quot;,
+    &quot;Python.browser_agent.executor&quot;: &quot;Run&quot;,
+    &quot;Python.browser_agent_v2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.deepseekAPI.executor&quot;: &quot;Run&quot;,
+    &quot;Python.example.executor&quot;: &quot;Run&quot;,
+    &quot;Python.python_tools.executor&quot;: &quot;Run&quot;,
+    &quot;Python.send_email.executor&quot;: &quot;Run&quot;,
+    &quot;Python.snake_game.executor&quot;: &quot;Run&quot;,
+    &quot;Python.ssh_controller.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/PC-Agent-V1&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\PC-Agent-V1" />
@@ -254,6 +282,8 @@
       <workItem from="1743583976263" duration="1000" />
       <workItem from="1743583985180" duration="2328000" />
       <workItem from="1743589122718" duration="94000" />
+      <workItem from="1743591930238" duration="8028000" />
+      <workItem from="1743617731175" duration="326000" />
     </task>
     <servers />
   </component>
@@ -271,6 +301,11 @@
       </map>
     </option>
   </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="1" />
+    <MESSAGE value="Auto update by PC-Agent at 2025-04-03 02:11:42" />
+    <option name="LAST_COMMIT_MESSAGE" value="Auto update by PC-Agent at 2025-04-03 02:11:42" />
+  </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/PC_Agent_V1$broswer.coverage" NAME="broswer 覆盖结果" MODIFIED="1738342759149" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$snake_game.coverage" NAME="snake_game 覆盖结果" MODIFIED="1737795026327" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
@@ -279,7 +314,7 @@
     <SUITE FILE_PATH="coverage/PC_Agent_V1$aaaa.coverage" NAME="aaaa 覆盖结果" MODIFIED="1743582557317" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$browser_agent.coverage" NAME="browser_agent 覆盖结果" MODIFIED="1738337500079" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$example.coverage" NAME="example 覆盖结果" MODIFIED="1737793319679" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/PC_Agent_V1$deepseekAPI.coverage" NAME="deepseekAPI 覆盖结果" MODIFIED="1743589197332" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/PC_Agent_V1$deepseekAPI.coverage" NAME="deepseekAPI 覆盖结果" MODIFIED="1743617746786" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$python_tools.coverage" NAME="python_tools 覆盖结果" MODIFIED="1737793314863" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$browser_agent_v2.coverage" NAME="browser_agent_v2 覆盖结果" MODIFIED="1738337386965" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$ssh_controller.coverage" NAME="ssh_controller 覆盖结果" MODIFIED="1738777834675" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />

@@ -111,7 +111,7 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 
 3. **语音功能不工作**：
    - 检查麦克风和扬声器设置
-   - 确保pyaudio正确安装
+   - 确保pyaudio和edge-tts正确安装
    - 语音识别需要网络连接
 
 4. **依赖安装问题**：
