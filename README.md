@@ -133,4 +133,7 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 
 仅供个人学习和研究使用
 
-联系邮箱：1792491376@qq.com
+联系邮箱：1792491376@qq.com### 新增功能
+- **AI任务自动化**：支持自动分解复杂任务并执行
+- **智能错误修复**：自动检测并尝试修复执行错误
+- **多工具集成**：增强文件操作、代码生成等工具链
