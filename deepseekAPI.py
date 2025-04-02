@@ -22,7 +22,7 @@ from file_utils import user_information_read
 from error_utils import parse_error_message, task_error_analysis
 from message_utils import num_tokens_from_messages, clean_message_history, clear_context
 from console_utils import print_color, print_success, print_error, print_warning, print_info, print_highlight
-from system_utils import powershell_command, list_directory
+from system_utils import powershell_command, list_directory, cmd_command
 
 load_dotenv()
 message_queue = Queue()
@@ -98,8 +98,8 @@ async def execute_task_with_planning(user_input, messages_history):
         # 添加任务规划到对话历史
         planning_messages.append({"role": "assistant", "content": task_plan})
         
-        # 执行任务（最多尝试5次）
-        max_attempts = 5
+        # 执行任务（最多尝试7次）
+        max_attempts = 7
         for attempt in range(max_attempts):
             try:
                 # 添加执行提示
@@ -115,7 +115,7 @@ async def execute_task_with_planning(user_input, messages_history):
                 
                 # 初始化递归验证
                 recursive_verify_count = 0
-                max_recursive_verify = 10  # 最大递归验证次数
+                max_recursive_verify = 15
                 is_task_complete = False
                 current_execution_messages = planning_messages.copy()
                 
@@ -190,6 +190,10 @@ async def execute_task_with_planning(user_input, messages_history):
                                 elif func_name == "powershell_command":
                                     # 执行原始命令
                                     cmd_result = await powershell_command(args["command"])
+                                    result = cmd_result
+                                elif func_name == "cmd_command":
+                                    # 执行CMD命令
+                                    cmd_result = await cmd_command(args["command"])
                                     result = cmd_result
                                 elif func_name == "email_check":
                                     result = get_email.retrieve_emails()
@@ -347,6 +351,109 @@ async def execute_task_with_planning(user_input, messages_history):
                         # 添加验证结果到消息历史
                         current_execution_messages.append({"role": "assistant", "content": verify_result})
                         
+                        # 增强的深度验证 - 检查潜在的虚假成功声明
+                        task_step_verification = """
+                        分析当前执行结果和历史工具调用，请验证：
+                        1. 任务的每个必要步骤是否都已执行并成功完成
+                        2. 最后一步操作的输出是否表明任务真正完成（而不是警告/错误信息）
+                        3. 是否有必要的前置操作被遗漏（如保存文件、提交更改等）
+                        4. 工具调用的输出结果是否表明操作已成功（不只是执行了命令）
+                        5. 任务声明的进度是否与实际完成的步骤一致
+                        6. 是否有"看起来完成但实际未完成"的情况（如无变更推送、空操作）
+
+                        对于声明的每个已完成步骤，请找出对应的工具调用证据。
+                        如果发现任何不一致或缺失步骤，请修正任务评估结果。
+                        
+                        具体回答：任务是否真正完成？如果未完成，还需要哪些步骤？
+                        """
+                        
+                        # 当任务可能完成时进行更严格的验证
+                        potential_completion = (
+                            "[完成]" in verify_result or 
+                            "100%" in verify_result or 
+                            "任务完成" in verify_result or
+                            "已完成" in verify_result
+                        )
+                        
+                        # 收集可能表明成功的词语但常常暗示问题的输出模式
+                        suspicious_patterns = [
+                            ("Everything up-to-date", "git push"),
+                            ("Already up-to-date", "git pull"),
+                            ("没有需要提交的内容", "git commit"),
+                            ("正常终止", "运行失败"),
+                            ("Not connected", "连接"),
+                            ("Permission denied", "权限"),
+                            ("已经存在", "创建"),
+                            ("未找到", "删除"),
+                            ("cannot access", "访问"),
+                            ("无法访问", "访问"),
+                            ("error", "错误"),
+                            ("Error:", "错误")
+                        ]
+                        
+                        # 检查工具输出中是否有可疑结果
+                        has_suspicious_output = False
+                        recent_tool_outputs = []
+                        
+                        # 提取最近的工具调用输出
+                        for i in range(len(current_execution_messages)-1, max(0, len(current_execution_messages)-20), -1):
+                            if current_execution_messages[i].get("role") == "tool":
+                                recent_tool_outputs.append(current_execution_messages[i].get("content", ""))
+                        
+                        # 在输出中查找可疑模式
+                        for output in recent_tool_outputs:
+                            for pattern, context in suspicious_patterns:
+                                if pattern in str(output) and context in str(current_execution_messages[-20:]):
+                                    has_suspicious_output = True
+                                    break
+                            if has_suspicious_output:
+                                break
+                                
+                        # 如果声称任务完成或有可疑输出，进行二次验证
+                        verification_performed = False
+                        if potential_completion or has_suspicious_output:
+                            verification_performed = True
+                            current_execution_messages.append({"role": "user", "content": task_step_verification})
+                            verification_response = client.chat.completions.create(
+                                model="deepseek-chat",
+                                messages=current_execution_messages,
+                                temperature=0.1
+                            )
+                            
+                            verification_result = verification_response.choices[0].message.content
+                            print_info("\n===== 深度任务验证 =====")
+                            print(verification_result)
+                            print_info("=========================\n")
+                            
+                            # 添加验证结果到消息历史
+                            current_execution_messages.append({"role": "assistant", "content": verification_result})
+                            
+                            # 根据深度验证结果判断任务是否真正完成
+                            completion_indicators = ["任务已真正完成", "所有步骤已完成", "已确认完成", "已完成所有必要步骤"]
+                            incomplete_indicators = ["未完成", "缺少步骤", "需要继续", "尚未完成", "未执行", "还需要"]
+                            
+                            is_verified_complete = any(indicator in verification_result for indicator in completion_indicators)
+                            is_verified_incomplete = any(indicator in verification_result for indicator in incomplete_indicators)
+                            
+                            if is_verified_incomplete or (not is_verified_complete and has_suspicious_output):
+                                # 添加纠正提示
+                                correction_prompt = """
+                                系统发现任务尚未真正完成。请继续执行必要步骤：
+                                
+                                1. 分析上一步的执行结果，确定是否达到了预期效果
+                                2. 仔细检查工具输出中的警告/错误信息
+                                3. 完成所有必要的前置和后置操作
+                                4. 验证每一步的实际结果，而非仅执行命令
+                                5. 如遇到意外结果，调整策略而非直接标记完成
+                                
+                                请继续执行任务，直到确认所有步骤真正达到了预期效果。
+                                """
+                                current_execution_messages.append({"role": "user", "content": correction_prompt})
+                                print_warning("\n⚠️ 发现任务未真正完成，将继续执行...")
+                                continue
+                                
+                        # 如果没有进行验证或验证通过，继续标准验证流程
+                        
                         # 解析验证结果 - 增强的结束任务判断
                         task_completed = False
                         task_failed = False
@@ -358,25 +465,81 @@ async def execute_task_with_planning(user_input, messages_history):
                             print_success("\n✅ 任务明确标记为已完成! 准备生成总结...")
                             break
                         elif "[失败]" in verify_result:
-                            is_task_complete = True  # 虽然失败但任务结束
-                            task_failed = True
-                            print_warning("\n⚠️ 任务明确标记为失败! 准备生成失败分析...")
-                            break
-                        
-                        # 备用检查 - 基于文本内容判断
-                        if "任务已完成" in verify_result or "任务完成" in verify_result:
+                            # 不要自动接受任务失败标记，而是增加一次确认步骤
+                            confirm_prompt = """
+                            系统检测到你标记了任务失败。在最终放弃前，请再次确认：
+
+                            1. 是否尝试了所有可能的解决方案？
+                            2. 是否有替代方法可以达到类似效果？
+                            3. 能否部分完成任务而非完全放弃？
+
+                            如果重新思考后确实无法完成，请明确回复"确认任务无法完成"
+                            否则，请继续尝试执行任务，寻找新的解决方案。
+                            """
+                            current_execution_messages.append({"role": "user", "content": confirm_prompt})
+                            
+                            # 获取确认响应
+                            confirm_response = client.chat.completions.create(
+                                model="deepseek-chat",
+                                messages=current_execution_messages,
+                                temperature=0.1
+                            )
+                            
+                            confirm_result = confirm_response.choices[0].message.content
+                            current_execution_messages.append({"role": "assistant", "content": confirm_result})
+                            
+                            print_info("\n===== 失败确认 =====")
+                            print(confirm_result)
+                            print_info("======================\n")
+                            
+                            # 只有在明确确认失败的情况下才标记为失败
+                            if "确认任务无法完成" in confirm_result:
+                                is_task_complete = True  # 虽然失败但任务结束
+                                task_failed = True
+                                print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
+                                break
+                        elif "任务已完成" in verify_result or "任务完成" in verify_result:
                             is_task_complete = True
                             task_completed = True
                             print_success("\n✅ 任务已完成! 准备生成总结...")
                             break
-                        elif "任务失败" in verify_result or "无法完成任务" in verify_result or "无法继续执行" in verify_result:
-                            is_task_complete = True  # 虽然失败但任务结束
-                            task_failed = True
-                            print_warning("\n⚠️ 任务失败! 准备生成失败分析...")
-                            break
+                        elif ("任务失败" in verify_result and "明确" in verify_result) or ("完全无法" in verify_result and "解决方案" not in verify_result):
+                            # 更严格的失败条件判断，必须明确表示完全无法继续
+                            confirm_prompt = """
+                            系统检测到你可能要放弃任务。在最终放弃前，请再次尝试思考：
+
+                            1. 是否尝试了所有可能的解决方案？
+                            2. 是否有替代方法可以达到类似效果？
+                            3. 能否部分完成任务而非完全放弃？
+
+                            如果重新思考后确实无法完成，请明确回复"确认任务无法完成"
+                            否则，请继续尝试执行任务，寻找新的解决方案。
+                            """
+                            current_execution_messages.append({"role": "user", "content": confirm_prompt})
+                            
+                            # 获取确认响应
+                            confirm_response = client.chat.completions.create(
+                                model="deepseek-chat",
+                                messages=current_execution_messages,
+                                temperature=0.1
+                            )
+                            
+                            confirm_result = confirm_response.choices[0].message.content
+                            current_execution_messages.append({"role": "assistant", "content": confirm_result})
+                            
+                            print_info("\n===== 失败确认 =====")
+                            print(confirm_result)
+                            print_info("======================\n")
+                            
+                            # 只有在明确确认失败的情况下才标记为失败
+                            if "确认任务无法完成" in confirm_result:
+                                is_task_complete = True  # 虽然失败但任务结束
+                                task_failed = True
+                                print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
+                                break
                         elif "部分完成" in verify_result and "100%" not in verify_result:
                             # 任务部分完成但达到了可接受的状态
-                            if "可接受" in verify_result or "已满足需求" in verify_result:
+                            if "可接受" in verify_result or "已满足需求" in verify_result or "基本满足" in verify_result:
                                 is_task_complete = True
                                 task_completed = True
                                 print_success("\n✅ 任务部分完成但已达到可接受状态! 准备生成总结...")
@@ -387,22 +550,35 @@ async def execute_task_with_planning(user_input, messages_history):
                         if progress_match:
                             current_progress = int(progress_match.group(1))
                             
-                            # 如果连续3次进度没有变化且已经执行了至少5次迭代，认为任务卡住了
-                            if recursive_verify_count >= 5:
+                            # 如果连续5次进度没有变化且已经执行了至少8次迭代，认为任务卡住了
+                            if recursive_verify_count >= 8:
                                 # 使用非类成员变量存储进度历史
                                 if 'last_progress_values' not in locals():
                                     last_progress_values = []
                                 
                                 last_progress_values.append(current_progress)
-                                if len(last_progress_values) > 3:
+                                if len(last_progress_values) > 5:
                                     last_progress_values.pop(0)
                                 
-                                # 检查最近3次进度是否相同
-                                if len(last_progress_values) == 3 and len(set(last_progress_values)) == 1:
-                                    is_task_complete = True
-                                    task_failed = True
-                                    print_warning(f"\n⚠️ 任务进度已连续3次保持在{current_progress}%! 判定为无法继续进行...")
-                                    break
+                                # 检查最近5次进度是否完全相同
+                                if len(last_progress_values) == 5 and len(set(last_progress_values)) == 1:
+                                    # 在放弃前，给模型一次突破机会
+                                    breakthrough_prompt = f"""
+                                    系统检测到任务进度已连续5次保持在{current_progress}%，看起来你可能遇到了阻碍。
+
+                                    请尝试以下策略来突破当前困境：
+                                    1. 改变思路，尝试完全不同的解决方案
+                                    2. 将复杂问题拆解为更小的步骤
+                                    3. 使用R1_opt工具寻求深度分析
+                                    4. 检查是否有其他工具可以帮助解决问题
+                                    5. 降低目标，尝试部分完成任务
+
+                                    请大胆创新，不要局限于之前的方法。这是你突破困境的最后机会。
+                                    """
+                                    current_execution_messages.append({"role": "user", "content": breakthrough_prompt})
+                                    
+                                    # 跳过自动判定卡住的逻辑，给模型一次突破的机会
+                                    continue
                         
                         # 如果任务未完成，让模型根据当前进展动态规划下一步
                         if recursive_verify_count < max_recursive_verify:
@@ -413,10 +589,12 @@ async def execute_task_with_planning(user_input, messages_history):
                             2. 不要解释你将要做什么，直接执行
                             3. 根据实际情况灵活调整执行计划
                             4. 遇到问题主动寻找解决方案
+                            5. 如果遇到困难，尝试更创新的方法或使用R1_opt寻求深度分析
                             
                             记住：
                             - 专注解决问题，而不是机械地按原计划执行
-                            - 如果任务确实无法完成，请明确表示"任务失败"并说明原因
+                            - 坚持不懈，尽量找到解决方案而非放弃
+                            - 只有在确实尝试了所有可能方法后，才考虑放弃任务
                             """
                             current_execution_messages.append({"role": "user", "content": plan_prompt})
                     else:
