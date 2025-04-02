@@ -197,36 +197,33 @@ messages = [{"role": "system",
 task_planning_system_message = {
     "role": "system",
     "content": """你现在是一个自主规划任务的智能体，请遵循以下原则：
-1. 接收到任务后，首先分析任务需求并制定执行计划
-2. 将复杂任务分解为可执行的子任务步骤
-3. 执行每个步骤并观察结果
-4. 如果执行过程中遇到错误或异常，分析错误原因并重新规划解决方案
-5. 持续尝试不同方法直到任务成功完成或确定无法完成
-6. 任务完成后总结执行过程和结果
+1. 接收到任务后，首先分析任务需求
+2. 仅提供高层次概括的计划，不要提供详细步骤
+3. 不要提供具体命令、代码、参数等执行细节
+4. 不要使用具体的文件路径或文件名
+5. 不要猜测用户环境和系统配置
+
+用户的个人信息如下，请在规划任务时充分利用这些信息:
+{user_info}
 
 执行方式：
-- 对于复杂任务，独立思考并自主规划解决方案
-- 根据用户输入或环境反馈调整计划
-- 使用工具执行具体操作（如执行命令、创建文件等）
-- 遇到错误时分析错误信息并自动修正
-- 使用循环方式验证任务是否完成，直到成功或确认失败
+- 任务拆解应限制在3-5个高级步骤
+- 每个步骤只描述"做什么"，不描述"怎么做"
+- 不要提供具体工具选择的建议
+- 不要假设任何环境配置
+- 提供简短的目标描述，而非执行说明
 
-关键能力：
-- 任务分解与规划能力
-- 错误检测与自动修复
-- 持续尝试与备选方案
-- 结果验证与确认
+反例（不要这样做）:
+❌ "首先使用powershell_command工具执行'cd C:\\Users\\name'命令"
+❌ "使用write_code创建app.py文件，内容为：import flask..."
+❌ "追加以下代码到main.py: def process_data()..."
 
-用户交互指南：
-- 当你需要用户提供更多信息时，使用user_input工具请求语音输入
-- 适合使用user_input的场景：
-  1. 需要用户确认某个重要决定（如删除文件、修改配置）
-  2. 需要用户提供任务中缺失的信息（如文件名、目标路径等）
-  3. 有多个可能的解决方案，需要用户选择
-  4. 任务执行过程中出现意外情况，需要用户提供指导
-- 使用简短明确的提示语，告诉用户需要提供什么信息
-- 设置合理的超时时间，避免长时间等待
-- 记住这是语音交互，用户将通过说话方式提供输入
+正确示例：
+✅ "确认当前工作目录"
+✅ "创建主应用程序文件"
+✅ "设置基本项目结构"
+
+任务分析完成后，agent会自行确定具体执行步骤、选择适当工具，并执行必要操作。你的任务只是提供高层次指导，而非执行细节。
 """
 }
 
@@ -246,28 +243,24 @@ async def execute_task_with_planning(user_input, messages_history):
     # 替换或添加任务规划系统消息
     system_message_index = next((i for i, msg in enumerate(planning_messages) if msg["role"] == "system"), None)
     task_planning_content = f"""你现在是一个自主规划任务的智能体，请遵循以下原则：
-1. 接收到任务后，首先分析任务需求并制定执行计划
-2. 将复杂任务分解为可执行的子任务步骤
-3. 执行每个步骤并观察结果
-4. 如果执行过程中遇到错误或异常，分析错误原因并重新规划解决方案
-5. 持续尝试不同方法直到任务成功完成或确定无法完成
-6. 任务完成后总结执行过程和结果
+1. 接收到任务后，首先分析任务需求
+2. 仅提供高层次概括的计划，不要提供详细步骤
+3. 不要提供具体命令、代码、参数等执行细节
+4. 不要使用具体的文件路径或文件名
+5. 不要猜测用户环境和系统配置
 
 用户的个人信息如下，请在规划任务时充分利用这些信息:
 {user_info}
 
 执行方式：
-- 对于复杂任务，独立思考并自主规划解决方案
-- 根据用户输入或环境反馈调整计划
-- 使用工具执行具体操作（如执行命令、创建文件等）
-- 遇到错误时分析错误信息并自动修正
-- 使用循环方式验证任务是否完成，直到成功或确认失败
+- 任务拆解应限制在3-5个高级步骤
+- 每个步骤只描述"做什么"，不描述"怎么做"
+- 不要提供具体工具选择的建议
+- 不要假设任何环境配置
+- 提供简短的目标描述，而非执行说明
 
-关键能力：
-- 任务分解与规划能力
-- 错误检测与自动修复
-- 持续尝试与备选方案
-- 结果验证与确认
+
+任务分析完成后，agent会自行确定具体执行步骤、选择适当工具，并执行必要操作。你的任务只是提供高层次指导，而非执行细节。
 """
     
     if system_message_index is not None:
@@ -277,7 +270,7 @@ async def execute_task_with_planning(user_input, messages_history):
         planning_messages.insert(0, {"role": "system", "content": task_planning_content})
     
     # 添加用户输入
-    planning_messages.append({"role": "user", "content": f"请完成以下任务，并详细规划执行步骤：{user_input}"})
+    planning_messages.append({"role": "user", "content": f"请分析以下任务，只提供高层次任务计划（3-5个步骤），不要提供具体执行细节：{user_input}"})
     
     # 检查token数量
     token_count = num_tokens_from_messages(planning_messages)
@@ -294,7 +287,7 @@ async def execute_task_with_planning(user_input, messages_history):
         )
         
         task_plan = planning_response.choices[0].message.content
-        print("\n===== 任务规划 =====")
+        print("\n===== 任务规划（高层次目标）=====")
         print(task_plan)
         print("====================\n")
         
@@ -312,7 +305,11 @@ async def execute_task_with_planning(user_input, messages_history):
         for attempt in range(max_attempts):
             try:
                 # 添加执行提示
-                execution_prompt = f"现在开始执行任务计划的第{attempt+1}次尝试。请调用适当的工具执行计划中的步骤。"
+                execution_prompt = f"""现在开始执行任务计划的第{attempt+1}次尝试。
+基于上述高层次目标，请自行确定具体执行步骤并调用适当的工具。
+不要解释你将如何执行，直接调用工具执行必要操作。
+每次只执行一个具体步骤，等待结果后再决定下一步。"""
+
                 if attempt > 0:
                     execution_prompt += f" 这是第{attempt+1}次尝试，前面{attempt}次尝试失败。请根据之前的错误调整策略。"
                 
@@ -326,168 +323,10 @@ async def execute_task_with_planning(user_input, messages_history):
                 
                 # 内部递归验证循环
                 while recursive_verify_count < max_recursive_verify and not is_task_complete:
-                    # 在执行新迭代前先验证任务是否已完成
-                    if recursive_verify_count > 0:  # 跳过第一次迭代的验证
-                        pre_verify_prompt = """
-                        请仔细分析之前的执行结果，判断当前任务是否已经完成。
-                        
-                        请考虑以下要点:
-                        1. 用户原始请求是否已经得到满足
-                        2. 所有必要的步骤是否已经执行完成
-                        3. 当前系统状态是否与预期一致
-                        
-                        另外，请评估当前任务的完成进度（0-100%的数值），并分析与上次执行相比是否有实质性进展。
-                        
-                        特别注意分析以下情况:
-                        1. 任务是否正在重复相同的步骤而没有实质进展
-                        2. 之前成功的部分是否出现了回退或错误
-                        3. 是否在不断尝试同一种方法但一直失败
-                        4. 任务是否进入了死循环或无法解决的困境
-                        5. 工具选择是否合理，特别是是否使用了专用工具而非通用命令
-                        
-                        请严格按照以下JSON格式回复:
-                        {
-                            "is_complete": true/false,  // 任务是否已完成
-                            "reason": "详细说明为什么任务已完成或尚未完成",
-                            "confidence": 0.0-1.0,  // 对判断的置信度，0.7及以上表示高度确信
-                            "progress_percentage": 0-100,  // 任务完成百分比
-                            "progress_description": "简短描述当前进度状态",
-                            "progress_change": "increase/stable/decrease",  // 与上次迭代相比，进度的变化
-                            "is_stuck": true/false,  // 任务是否陷入无法继续的状态
-                            "stuck_reason": "如果任务陷入僵局，说明原因",
-                            "stuck_confidence": 0.0-1.0,  // 对任务陷入僵局判断的置信度
-                            "next_step_difficulty": "low/medium/high",  // 下一步操作的难度评估
-                            "tool_selection_appropriate": true/false,  // 工具选择是否合适
-                            "better_tool_suggestion": "如果工具选择不合适，建议使用什么工具"
-                        }
-                        
-                        重要提醒：
-                        1. 如果任务已经明确完成，请返回is_complete=true，避免不必要的继续迭代。
-                        2. 如果任务确实陷入僵局或多次尝试同一方法但失败，请诚实评估并返回is_stuck=true。
-                        3. 对于代码操作，应该使用专门的工具而非PowerShell命令，如果发现此类情况，请在better_tool_suggestion中推荐更合适的工具。
-                        """
-                        
-                        # 检查token数量
-                        token_count = num_tokens_from_messages(current_execution_messages)
-                        if token_count > 30000:
-                            current_execution_messages = clean_message_history(current_execution_messages)
-                        
-                        temp_verify_messages = current_execution_messages.copy()
-                        temp_verify_messages.append({"role": "user", "content": pre_verify_prompt})
-                        
-                        # 调用验证
-                        pre_verify_response = client.chat.completions.create(
-                            model="deepseek-chat",
-                            messages=temp_verify_messages,
-                            temperature=0.1
-                        )
-                        
-                        pre_verify_result = pre_verify_response.choices[0].message.content
-                        print_info("\n===== 迭代前任务验证结果 =====")
-                        print(pre_verify_result)
-                        print_info("==============================\n")
-                        
-                        # 解析验证结果
-                        try:
-                            # 尝试提取JSON部分
-                            json_match = re.search(r'({.*})', pre_verify_result, re.DOTALL)
-                            if json_match:
-                                pre_verify_json = json.loads(json_match.group(1))
-                                
-                                # 更新任务进度
-                                if "progress_percentage" in pre_verify_json:
-                                    new_progress = pre_verify_json["progress_percentage"]
-                                    # 初始化进度历史变量（如果尚未定义）
-                                    if 'progress_history' not in locals():
-                                        progress_history = []
-                                        last_progress = 0
-                                        
-                                    # 保存进度历史
-                                    progress_history.append(new_progress)
-                                    
-                                    # 获取进度变化评估
-                                    progress_change = pre_verify_json.get("progress_change", "stable")
-                                    
-                                    # 语音播报重要的任务进度变化
-                                    progress_message = None
-                                    
-                                    # 提供进度信息但不作为终止判断依据
-                                    if progress_change == "decrease":
-                                        print_warning(f"\n⚠️ LLM评估任务进度倒退! 当前进度: {new_progress}%")
-                                        if new_progress < last_progress - 10:  # 大幅倒退时语音提示
-                                            progress_message = f"警告：任务进度出现明显倒退，从{last_progress}%降至{new_progress}%"
-                                    elif progress_change == "stable":
-                                        print_warning(f"\n⚠️ 本次迭代进度未变化。当前进度: {new_progress}%")
-                                        if recursive_verify_count > 3 and progress_change == "stable" and new_progress < 50:
-                                            # 多次无进展且完成度不高时语音提示
-                                            progress_message = "警告：任务连续多次没有进展，可能遇到难题"
-                                    else:  # increase
-                                        print_success(f"\n✅ 任务取得进展! 进度从 {last_progress}% 提升至 {new_progress}%")
-                                        if new_progress - last_progress >= 20:  # 大幅进展时语音提示
-                                            progress_message = f"任务取得显著进展，完成度已达{new_progress}%"
-                                    
-                                    # 播放进度语音提示（如果有）
-                                    if progress_message:
-                                        await text_to_speech(progress_message)
-                                        
-                                    last_progress = new_progress
-                                    task_progress = new_progress
-                                
-                                # 获取任务陷入僵局的信息（如果有）
-                                stuck_reason = pre_verify_json.get("stuck_reason", "未提供具体原因") if pre_verify_json.get("is_stuck", False) else None
-                                stuck_confidence = pre_verify_json.get("stuck_confidence", 0.0) if pre_verify_json.get("is_stuck", False) else 0.0
-                                
-                                # 处理任务完成情况
-                                if pre_verify_json.get("is_complete", False) and pre_verify_json.get("confidence", 0) >= 0.7:
-                                    print_success("\n✅ 预验证确认任务已完成! 无需继续迭代...")
-                                    is_task_complete = True
-                                    
-                                    # 语音通知任务完成
-                                    completion_reason = pre_verify_json.get("reason", "任务已成功完成")
-                                    await text_to_speech(f"任务已经完成。{completion_reason}")
-                                    
-                                    # 将预验证结果添加到执行消息中
-                                    current_execution_messages.append({"role": "user", "content": pre_verify_prompt})
-                                    current_execution_messages.append({"role": "assistant", "content": pre_verify_result})
-                                    
-                                    # 添加完成状态信息
-                                    verify_json = {
-                                        "is_complete": True,
-                                        "completion_status": completion_reason,
-                                        "is_failed": False
-                                    }
-                                    break
-                                
-                                # 处理任务陷入僵局的情况 - 仅依赖LLM的判断
-                                if pre_verify_json.get("is_stuck", False) and stuck_confidence >= 0.7:
-                                    failure_reason = f"LLM评估任务已陷入僵局 (置信度: {stuck_confidence:.2f}): {stuck_reason}"
-                                    print_error(f"\n❌ 任务无法继续: {failure_reason}")
-                                    is_task_complete = False
-                                    
-                                    # 语音通知任务陷入僵局
-                                    await text_to_speech(f"任务执行遇到困难，无法继续。{stuck_reason}")
-                                    
-                                    # 添加失败状态信息
-                                    verify_json = {
-                                        "is_complete": False,
-                                        "completion_status": f"任务执行失败: {failure_reason}",
-                                        "is_failed": True,
-                                        "failure_reason": failure_reason
-                                    }
-                                    break
-                        except (json.JSONDecodeError, ValueError) as e:
-                            print_warning(f"预验证结果解析失败: {str(e)}")
-                            # 解析失败，继续正常迭代
-                    
                     recursive_verify_count += 1
                     
-                    # 初始化任务进度变量（如果不存在）
-                    if 'task_progress' not in locals():
-                        task_progress = 0
-                    
-                    # 显示迭代次数和任务进度
-                    progress_bar = "=" * int(task_progress/5) + ">" + " " * (20 - int(task_progress/5))
-                    print(f"\n===== 任务执行迭代 {recursive_verify_count}/{max_recursive_verify} | 进度: {task_progress}% [{progress_bar}] =====")
+                    # 显示迭代次数
+                    print(f"\n===== 任务执行迭代 {recursive_verify_count}/{max_recursive_verify} =====")
                     
                     # 检查当前token数量
                     token_count = num_tokens_from_messages(current_execution_messages)
@@ -545,37 +384,9 @@ async def execute_task_with_planning(user_input, messages_history):
                                 elif func_name == "get_weather":
                                     result = get_weather(args["city"])
                                 elif func_name == "powershell_command":
-                                    # 检查是否存在更合适的专用工具
-                                    command = args["command"].lower()
-                                    better_tool = None
-                                    warning_msg = ""
-                                    
-                                    # 检测是否在进行代码操作，应该使用专用代码工具
-                                    if (("echo" in command or "set-content" in command or "add-content" in command or "out-file" in command) and 
-                                        any(ext in command for ext in [".py", ".js", ".html", ".css", ".json", ".txt", ".md"])):
-                                        if "append" in command or "add-content" in command:
-                                            better_tool = "append_code"
-                                        else:
-                                            better_tool = "write_code"
-                                    elif "get-content" in command and any(ext in command for ext in [".py", ".js", ".html", ".css", ".json", ".txt", ".md"]):
-                                        better_tool = "read_code"
-                                    elif "dir" in command or "get-childitem" in command or "ls" in command:
-                                        better_tool = "list_directory 或 list_files"
-                                    
-                                    if better_tool:
-                                        print_warning(f"\n⚠️ 检测到不理想的工具选择: 使用powershell_command执行代码/文件操作")
-                                        print_warning(f"💡 建议使用专用工具: {better_tool}")
-                                        # 添加提示到结果中
-                                        warning_msg = f"\n[工具选择提示] 此操作更适合使用 {better_tool} 工具，请在下次迭代中考虑使用专用工具。"
-                                        
                                     # 执行原始命令
                                     cmd_result = await powershell_command(args["command"])
-                                    
-                                    # 如果有更好的工具选择，添加提示到结果中
-                                    if better_tool:
-                                        result = cmd_result + warning_msg
-                                    else:
-                                        result = cmd_result
+                                    result = cmd_result
                                 elif func_name == "email_check":
                                     result = get_email.retrieve_emails()
                                 elif func_name == "email_details":
@@ -633,6 +444,8 @@ async def execute_task_with_planning(user_input, messages_history):
                                     result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
                                 elif func_name == "list_files":
                                     result = file_reader.list_files(args["directory_path"], args["include_pattern"], args["recursive"])
+                                elif func_name == "list_directory":
+                                    result = await list_directory(args.get("path", "."))
                                 else:
                                     raise ValueError(f"未定义的工具调用: {func_name}")
                                 
@@ -670,29 +483,27 @@ async def execute_task_with_planning(user_input, messages_history):
                         
                         # 验证当前步骤执行后，任务是否完成
                         verify_prompt = """
-                        基于目前的执行情况，请分析当前任务的完成状态:
-                        1. 任务是否已完全完成？如果完成，请详细说明完成的内容和结果。
-                        2. 如果任务未完成，还需要执行哪些步骤？
-                        3. 是否存在无法克服的障碍使任务无法继续？
+                        请分析当前任务的执行情况：
                         
-                        请严格按照以下格式回复:
-                        {
-                            "is_complete": true/false,  // 任务是否完成
-                            "completion_status": "简短描述任务状态",
-                            "next_steps": ["下一步1", "下一步2"],  // 若任务未完成，下一步需要执行的操作列表
-                            "is_failed": true/false,  // 任务是否已失败且无法继续
-                            "failure_reason": "若已失败，失败的原因",
-                            "environment_status": {  // 当前环境状态
-                                "key1": "value1",
-                                "key2": "value2"
-                            }
-                        }
+                        1. 对已完成的步骤进行简要总结
+                        2. 评估当前任务的进展程度 (0-100%)
+                        3. 确认是否需要调整原计划
+                        4. 明确规划接下来的1-2步具体行动
+                        
+                        任务结束判断：
+                        - 如果任务已完全完成，请明确表示"任务已完成"并总结结果
+                        - 如果任务无法继续执行或遇到无法克服的障碍，请明确表示"任务失败"并说明原因
+                        - 如果任务部分完成但达到了可接受的结果，请表示"任务部分完成"
+                        
+                        请清晰标记任务状态为：[完成]/[失败]/[继续]
                         """
                         
-                        # 在验证前检查token数量
+                        # 检查当前token数量
                         token_count = num_tokens_from_messages(current_execution_messages)
-                        print_info(f"验证前token数量: {token_count}")
-                        if token_count > 30000:
+                        print_info(f"当前token数量: {token_count}")
+                        
+                        # 如果token数量超过阈值，清理消息历史
+                        if token_count > 30000:  # 设置30000作为预警阈值
                             print_warning("Token数量超过预警阈值，清理消息历史...")
                             current_execution_messages = clean_message_history(current_execution_messages)
                         
@@ -706,60 +517,85 @@ async def execute_task_with_planning(user_input, messages_history):
                         )
                         
                         verify_result = verify_response.choices[0].message.content
-                        print_info("\n===== 任务验证结果 =====")
+                        print_info("\n===== 任务进展评估 =====")
                         print(verify_result)
                         print_info("=========================\n")
                         
                         # 添加验证结果到消息历史
                         current_execution_messages.append({"role": "assistant", "content": verify_result})
                         
-                        # 解析验证结果
-                        try:
-                            # 尝试提取JSON部分
-                            json_match = re.search(r'({.*})', verify_result, re.DOTALL)
-                            if json_match:
-                                verify_json = json.loads(json_match.group(1))
-                            else:
-                                # 如果没有明确的JSON，尝试更灵活的解析
-                                verify_json = {
-                                    "is_complete": "true" in verify_result.lower() and "完成" in verify_result,
-                                    "is_failed": "失败" in verify_result or "无法继续" in verify_result,
-                                    "completion_status": verify_result[:100] + "..."  # 简短摘要
-                                }
-                            
-                            # 检查任务是否完成或失败
-                            if verify_json.get("is_complete", False) is True:
+                        # 解析验证结果 - 增强的结束任务判断
+                        task_completed = False
+                        task_failed = False
+                        
+                        # 检查是否明确标记了任务状态
+                        if "[完成]" in verify_result:
+                            is_task_complete = True
+                            task_completed = True
+                            print_success("\n✅ 任务明确标记为已完成! 准备生成总结...")
+                            break
+                        elif "[失败]" in verify_result:
+                            is_task_complete = True  # 虽然失败但任务结束
+                            task_failed = True
+                            print_warning("\n⚠️ 任务明确标记为失败! 准备生成失败分析...")
+                            break
+                        
+                        # 备用检查 - 基于文本内容判断
+                        if "任务已完成" in verify_result or "任务完成" in verify_result:
+                            is_task_complete = True
+                            task_completed = True
+                            print_success("\n✅ 任务已完成! 准备生成总结...")
+                            break
+                        elif "任务失败" in verify_result or "无法完成任务" in verify_result or "无法继续执行" in verify_result:
+                            is_task_complete = True  # 虽然失败但任务结束
+                            task_failed = True
+                            print_warning("\n⚠️ 任务失败! 准备生成失败分析...")
+                            break
+                        elif "部分完成" in verify_result and "100%" not in verify_result:
+                            # 任务部分完成但达到了可接受的状态
+                            if "可接受" in verify_result or "已满足需求" in verify_result:
                                 is_task_complete = True
-                                print_success("\n✅ 任务已完成! 准备生成总结...")
+                                task_completed = True
+                                print_success("\n✅ 任务部分完成但已达到可接受状态! 准备生成总结...")
                                 break
+                        
+                        # 检查是否多次重复相同的步骤 - 通过进度判断是否卡住
+                        progress_match = re.search(r'(\d+)%', verify_result)
+                        if progress_match:
+                            current_progress = int(progress_match.group(1))
                             
-                            if verify_json.get("is_failed", False) is True:
-                                print_error(f"\n❌ 任务无法继续: {verify_json.get('failure_reason', '未知原因')}")
-                                break
+                            # 如果连续3次进度没有变化且已经执行了至少5次迭代，认为任务卡住了
+                            if recursive_verify_count >= 5:
+                                # 使用非类成员变量存储进度历史
+                                if 'last_progress_values' not in locals():
+                                    last_progress_values = []
+                                
+                                last_progress_values.append(current_progress)
+                                if len(last_progress_values) > 3:
+                                    last_progress_values.pop(0)
+                                
+                                # 检查最近3次进度是否相同
+                                if len(last_progress_values) == 3 and len(set(last_progress_values)) == 1:
+                                    is_task_complete = True
+                                    task_failed = True
+                                    print_warning(f"\n⚠️ 任务进度已连续3次保持在{current_progress}%! 判定为无法继续进行...")
+                                    break
+                        
+                        # 如果任务未完成，让模型根据当前进展动态规划下一步
+                        if recursive_verify_count < max_recursive_verify:
+                            plan_prompt = """
+                            基于当前任务的进展情况，请执行下一步操作：
                             
-                            # 如果任务未完成也未失败，继续下一步
-                            next_steps = verify_json.get("next_steps", ["请继续执行任务的下一步骤"])
-                            if isinstance(next_steps, list):
-                                next_step_text = "\n".join([f"- {step}" for step in next_steps])
-                            else:
-                                next_step_text = str(next_steps)
+                            1. 直接调用相应的工具执行下一步
+                            2. 不要解释你将要做什么，直接执行
+                            3. 根据实际情况灵活调整执行计划
+                            4. 遇到问题主动寻找解决方案
                             
-                            print_info("\n===== 下一步计划 =====")
-                            print_highlight(next_step_text)
-                            print_info("======================\n")
-                            
-                            current_execution_messages.append({
-                                "role": "user", 
-                                "content": f"任务尚未完成。现在请执行下一步: {next_step_text}"
-                            })
-                            
-                        except (json.JSONDecodeError, ValueError) as e:
-                            print_error(f"验证结果解析失败: {str(e)}")
-                            # 如果解析失败，简单继续
-                            current_execution_messages.append({
-                                "role": "user", 
-                                "content": "请继续执行任务的下一步骤。"
-                            })
+                            记住：
+                            - 专注解决问题，而不是机械地按原计划执行
+                            - 如果任务确实无法完成，请明确表示"任务失败"并说明原因
+                            """
+                            current_execution_messages.append({"role": "user", "content": plan_prompt})
                     else:
                         # 没有工具调用，可能是任务结束或需要进一步指导
                         content = message_data.content
@@ -778,21 +614,36 @@ async def execute_task_with_planning(user_input, messages_history):
                         
                         # 如果模型未调用工具但也未完成，提示继续
                         if recursive_verify_count < max_recursive_verify:
-                            current_execution_messages.append({
-                                "role": "user", 
-                                "content": "请继续执行任务，如果需要，请调用相应的工具。"
-                            })
+                            plan_prompt = """
+                            基于当前任务的进展情况，请执行下一步操作：
+                            
+                            1. 直接调用相应的工具执行下一步
+                            2. 不要解释你将要做什么，直接执行
+                            3. 根据实际情况灵活调整执行计划
+                            4. 遇到问题主动寻找解决方案
+                            
+                            记住：专注解决问题，而不是机械地按原计划执行。
+                            """
+                            current_execution_messages.append({"role": "user", "content": plan_prompt})
                 
                 # 内部递归结束后，更新外部消息历史
                 planning_messages = current_execution_messages.copy()
                 
                 # 检查任务是否在递归内完成
                 if is_task_complete:
-                    # 任务成功，获取简洁总结回复
-                    planning_messages.append({
-                        "role": "user", 
-                        "content": "任务执行完成，请简洁总结执行结果（不超过100字）。使用简短句子，避免复杂解释。"
-                    })
+                    # 根据任务是否成功完成或失败选择不同提示
+                    if not task_failed:
+                        # 任务成功，获取简洁总结回复
+                        planning_messages.append({
+                            "role": "user", 
+                            "content": "任务执行完成，请简洁总结执行结果（不超过100字）。使用简短句子，避免复杂解释。"
+                        })
+                    else:
+                        # 任务失败，获取失败原因和建议
+                        planning_messages.append({
+                            "role": "user", 
+                            "content": "任务执行失败，请简要说明失败原因和可能的解决方案（不超过100字）。"
+                        })
                     
                     # 最后的总结回复
                     final_response = client.chat.completions.create(
@@ -803,9 +654,14 @@ async def execute_task_with_planning(user_input, messages_history):
                     )
                     
                     summary = final_response.choices[0].message.content
-                    print("\n===== 任务执行总结 =====")
-                    print(summary)
-                    print("========================\n")
+                    
+                    if not task_failed:
+                        print_info("\n===== 任务执行总结 =====")
+                        print(summary)
+                    else:
+                        print_info("\n===== 任务失败分析 =====")
+                        print_error(summary)
+                    print_info("========================\n")
                     
                     # 添加到主对话历史
                     messages_history.append({"role": "user", "content": user_input})

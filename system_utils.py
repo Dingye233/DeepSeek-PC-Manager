@@ -338,10 +338,17 @@ async def powershell_command(command: str) -> str:
             )
 
             summary = response.choices[0].message.content
-            return f"命令执行成功 (LLM摘要):\n{summary}"
+            # 返回完整的命令输出和LLM摘要
+            return f"""
+## 命令执行成功 (完整输出):
+{stdout}
+
+## LLM摘要:
+{summary}
+"""
         except Exception as e:
             # LLM调用失败时返回原始输出
-            return f"执行成功 (LLM摘要失败: {str(e)}):\n{stdout[:1000]}{'...' if len(stdout) > 1000 else ''}"
+            return f"执行成功 (LLM摘要失败: {str(e)}):\n{stdout}"
     elif proc.returncode == 0:
         return f"命令执行成功（无输出）{interaction_info}"
     else:

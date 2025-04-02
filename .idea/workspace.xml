@@ -5,37 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1c3a9118-83e2-4649-a0d9-60f95eae1c46" name="更改" comment="">
-      <change afterPath="$PROJECT_DIR$/api_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/console_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/error_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/file_reader.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/file_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/input_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/message_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/system_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/time_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tool_registry.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/voice_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/weather_utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/R1_optimize.py" beforeDir="false" afterPath="$PROJECT_DIR$/R1_optimize.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/aaaa.py" beforeDir="false" afterPath="$PROJECT_DIR$/aaaa.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/auto_setup.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/code_generator.py" beforeDir="false" afterPath="$PROJECT_DIR$/code_generator.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/code_tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/code_tools.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/code_tools_README.md" beforeDir="false" afterPath="$PROJECT_DIR$/code_tools_README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/deepseekAPI.py" beforeDir="false" afterPath="$PROJECT_DIR$/deepseekAPI.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/empty_test_file.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/handwriting_model.h5" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/handwriting_recognition.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/handwriting_recognition_report.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/mnist_training.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/send_email.py" beforeDir="false" afterPath="$PROJECT_DIR$/send_email.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ssh_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ssh_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tts_http_demo.py" beforeDir="false" afterPath="$PROJECT_DIR$/tts_http_demo.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/welcome.mp3" beforeDir="false" afterPath="$PROJECT_DIR$/welcome.mp3" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tool_registry.py" beforeDir="false" afterPath="$PROJECT_DIR$/tool_registry.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -283,7 +256,7 @@
       <workItem from="1743583985180" duration="2328000" />
       <workItem from="1743589122718" duration="94000" />
       <workItem from="1743591930238" duration="8028000" />
-      <workItem from="1743617731175" duration="326000" />
+      <workItem from="1743617731175" duration="1214000" />
     </task>
     <servers />
   </component>

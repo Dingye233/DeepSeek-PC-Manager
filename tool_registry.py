@@ -78,13 +78,13 @@ def get_tools():
             "type": "function",
             "function": {
                 "name": "powershell_command",
-                "description": "【系统操作工具】通过PowerShell终端来控制系统操作（进程控制/系统设置等），具有智能交互能力，可自动分析并响应命令执行过程中的确认请求。注意：对于代码和文件操作，请优先使用专用工具（write_code/read_code/append_code/read_file/list_files等）而非此工具。",
+                "description": "【系统操作工具】通过PowerShell终端来控制系统操作（进程控制/系统设置等），具有智能交互能力，可自动分析并响应命令执行过程中的确认请求。注意：对于代码和文件操作，请优先使用专用工具（write_code/read_code/append_code/read_file/list_files等）而非此工具。推荐一次执行一条命令，避免使用分号连接多条命令。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "command": {
                             "type": "string",
-                            "description": "要执行的PowerShell命令（多条用;分隔）。工具会智能处理需要用户确认的情况，无需手动添加-Force等参数"
+                            "description": "要执行的PowerShell命令。推荐一次执行单条命令，避免使用;分隔符连接多条命令，复杂任务应拆分为多个独立命令逐步执行。工具会智能处理需要用户确认的情况，无需手动添加-Force等参数。"
                         }
                     },
                     "required": ["command"]
