@@ -1467,49 +1467,49 @@ async def get_web_console_confirm(prompt: str, confirm_text: str = "确认", can
 
 
 # 替代选择函数，从Web前端获取用户选择
-async def get_web_console_select(prompt: str, options: list) -> dict:
-    """
-    获取用户从多个选项中的选择，仅使用语音输入
-    :param prompt: 提示信息
-    :param options: 选项列表
-    :return: 选中的选项
-    """
-    print(f"\n{prompt}")
+# async def get_web_console_select(prompt: str, options: list) -> dict:
+#     """
+#     获取用户从多个选项中的选择，仅使用语音输入
+#     :param prompt: 提示信息
+#     :param options: 选项列表
+#     :return: 选中的选项
+#     """
+#     print(f"\n{prompt}")
     
-    for i, option in enumerate(options, 1):
-        option_text = option.get("text", str(option))
-        print(f"{i}. {option_text}")
+#     for i, option in enumerate(options, 1):
+#         option_text = option.get("text", str(option))
+#         print(f"{i}. {option_text}")
     
-    # 播放语音提示
-    await text_to_speech(f"{prompt}，请选择1到{len(options)}之间的选项")
+#     # 播放语音提示
+#     await text_to_speech(f"{prompt}，请选择1到{len(options)}之间的选项")
     
-    # 使用语音输入，最多尝试3次
-    for attempt in range(3):
-        print(f"请开始语音输入... (尝试 {attempt+1}/3)")
-        user_input = recognize_speech()
+#     # 使用语音输入，最多尝试3次
+#     for attempt in range(3):
+#         print(f"请开始语音输入... (尝试 {attempt+1}/3)")
+#         user_input = recognize_speech()
         
-        if user_input:
-            print(f"语音识别结果: {user_input}")
-            # 尝试从语音中提取数字
-            for i, option in enumerate(options, 1):
-                if str(i) in user_input or option.get("text", "") in user_input:
-                    return options[i-1]
+#         if user_input:
+#             print(f"语音识别结果: {user_input}")
+#             # 尝试从语音中提取数字
+#             for i, option in enumerate(options, 1):
+#                 if str(i) in user_input or option.get("text", "") in user_input:
+#                     return options[i-1]
             
-            print("无法从语音中识别选项，请更清晰地说出选项编号")
-        else:
-            print(f"未能识别语音输入，再试一次...")
+#             print("无法从语音中识别选项，请更清晰地说出选项编号")
+#         else:
+#             print(f"未能识别语音输入，再试一次...")
     
-    # 3次都失败后，默认选第一个或紧急情况下允许文本输入
-    print("多次语音识别失败，允许文本输入")
-    try:
-        user_choice = int(input(f"紧急情况下允许文本输入，请输入数字 (1-{len(options)}): "))
-        if 1 <= user_choice <= len(options):
-            return options[user_choice-1]
-    except ValueError:
-        pass
+#     # 3次都失败后，默认选第一个或紧急情况下允许文本输入
+#     print("多次语音识别失败，允许文本输入")
+#     try:
+#         user_choice = int(input(f"紧急情况下允许文本输入，请输入数字 (1-{len(options)}): "))
+#         if 1 <= user_choice <= len(options):
+#             return options[user_choice-1]
+#     except ValueError:
+#         pass
     
-    print("使用第一个选项作为默认值")
-    return options[0]
+#     print("使用第一个选项作为默认值")
+#     return options[0]
 
 
 # 语音识别函数
