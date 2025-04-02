@@ -1,0 +1,10 @@
+openai
+python-dotenv
+edge-tts
+playsound
+requests
+speechrecognition
+keyboard
+pyaudio
+wave
+tiktoken
