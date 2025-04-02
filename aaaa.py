@@ -326,6 +326,27 @@ tools = [
     {
         "type": "function",
         "function": {
+            "name": "user_input",
+            "description": "当需要用户提供额外信息或确认时使用此工具，将暂停执行并使用语音方式等待用户输入",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "向用户展示的提示信息，会通过语音读出"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "等待用户输入的最大秒数，默认60秒"
+                    }
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ssh",
             "description": "管理远程ubuntu服务器",
             "parameters": {
@@ -612,6 +633,17 @@ task_planning_system_message = {
 - 错误检测与自动修复
 - 持续尝试与备选方案
 - 结果验证与确认
+
+用户交互指南：
+- 当你需要用户提供更多信息时，使用user_input工具请求语音输入
+- 适合使用user_input的场景：
+  1. 需要用户确认某个重要决定（如删除文件、修改配置）
+  2. 需要用户提供任务中缺失的信息（如文件名、目标路径等）
+  3. 有多个可能的解决方案，需要用户选择
+  4. 任务执行过程中出现意外情况，需要用户提供指导
+- 使用简短明确的提示语，告诉用户需要提供什么信息
+- 设置合理的超时时间，避免长时间等待
+- 记住这是语音交互，用户将通过说话方式提供输入
 """
 }
 
@@ -943,6 +975,39 @@ async def execute_task_with_planning(user_input, messages_history):
                                     result = code_tools.read_code(args["file_name"])
                                 elif func_name == "create_module":
                                     result = code_tools.create_module(args["module_name"], args["functions_json"])
+                                elif func_name == "user_input":
+                                    # 使用语音方式请求用户输入
+                                    prompt = args.get("prompt", "请提供更多信息：")
+                                    timeout = args.get("timeout", 60)
+                                    
+                                    # 播放语音提示
+                                    await text_to_speech(prompt)
+                                    
+                                    # 等待语音输入
+                                    print_info(f"\n正在等待语音输入... (超时: {timeout}秒)")
+                                    start_time = time.time()
+                                    user_input = ""
+                                    
+                                    # 尝试获取语音输入，最多尝试3次
+                                    for attempt in range(3):
+                                        if time.time() - start_time > timeout:
+                                            break
+                                            
+                                        print_info(f"请开始说话... (尝试 {attempt+1}/3)")
+                                        speech_input = recognize_speech()
+                                        
+                                        if speech_input:
+                                            user_input = speech_input
+                                            print_success(f"语音识别结果: {user_input}")
+                                            break
+                                        else:
+                                            print_warning(f"未能识别语音输入，再试一次...")
+                                            time.sleep(1)
+                                    
+                                    if user_input:
+                                        result = f"用户语音输入: {user_input}"
+                                    else:
+                                        result = "用户未提供语音输入（超时或识别失败）"
                                 else:
                                     # 执行其他工具调用，查找函数并调用
                                     function_to_call = globals().get(func_name)
@@ -1467,12 +1532,21 @@ def recognize_speech() -> str:
         }
 
         r = sr.Recognizer()
+        
+        # 增加录音结束的灵敏度，缩短停顿检测时间
+        r.pause_threshold = 0.5  # 降低暂停阈值，使其更快检测到停顿（默认为0.8秒）
+        r.non_speaking_duration = 0.3  # 确认为非讲话状态的持续时间（默认为0.5秒）
+        r.phrase_threshold = 0.3  # 降低短语阈值（默认为0.5）
+        r.dynamic_energy_threshold = True  # 使用动态能量阈值
+        r.dynamic_energy_adjustment_damping = 0.15  # 动态能量调整阻尼（降低以使其更快响应）
+        
         with sr.Microphone() as source:
             # 调整环境噪声
-            r.adjust_for_ambient_noise(source, duration=0.5)
+            r.adjust_for_ambient_noise(source, duration=1.0)  # 增加环境噪声采样时间以更准确
             print_info("正在听取您的语音...")
             try:
-                audio = r.listen(source, timeout=5, phrase_time_limit=10)
+                # 增加超时时间，并增加单词短语的最大持续时间
+                audio = r.listen(source, timeout=10, phrase_time_limit=20)
                 print_info("录音结束，正在识别...")
             except sr.WaitTimeoutError:
                 print_warning("超时未检测到语音输入")
@@ -1509,6 +1583,7 @@ def recognize_speech() -> str:
                 print_error(f"删除临时文件失败: {e}")
     except Exception as e:
         print_error(f"语音识别过程错误: {e}")
+        print_error(traceback.format_exc())  # 打印完整错误堆栈以便调试
     return ""
 
 

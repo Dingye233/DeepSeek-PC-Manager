@@ -25,7 +25,9 @@ import wave
 from tts_http_demo import tts_volcano
 import uuid
 import code_tools  # 导入新的代码工具模块
+import traceback
 import tiktoken  # 添加tiktoken用于计算token
+from typing import Optional  # 添加 Optional 类型导入
 
 load_dotenv()
 message_queue = Queue()
@@ -151,6 +153,35 @@ def get_current_time(timezone: str = "UTC") -> str:
 def R1_opt(message:str)->str:
     return R1(message)
 
+async def get_user_input_async(prompt: str, timeout: int = 30) -> Optional[str]:
+    """
+    异步获取用户输入，支持超时
+    
+    Args:
+        prompt: 提示用户的文本
+        timeout: 等待用户输入的最大秒数，默认30秒
+        
+    Returns:
+        用户输入的文本，如果超时则返回None
+    """
+    print(f"\n{prompt}")
+    print(f"(等待用户输入，{timeout}秒后自动继续...)")
+    
+    try:
+        # 创建一个任务来执行用户输入
+        loop = asyncio.get_event_loop()
+        input_task = loop.run_in_executor(None, input, "")
+        
+        # 等待任务完成，设置超时
+        result = await asyncio.wait_for(input_task, timeout=timeout)
+        return result
+    except asyncio.TimeoutError:
+        print(f"\n输入超时，继续执行...")
+        return None
+    except Exception as e:
+        print(f"\n获取用户输入时出错: {str(e)}")
+        return None
+
 async def powershell_command(command: str) -> str:
     """改进后的交互式命令执行函数"""
     interaction_pattern = re.compile(
@@ -194,7 +225,12 @@ async def powershell_command(command: str) -> str:
                 # 检测到交互提示
                 if interaction_pattern.search(buffer):
                     # 挂起当前协程，等待用户输入
-                    user_input = await get_user_input_async("\n需要确认，请输入响应后回车：")
+                    user_input = await get_user_input_async("需要确认，请输入响应：")
+                    if user_input is None:
+                        # 如果用户没有输入（超时），使用默认值
+                        user_input = "y"  # 默认确认
+                        print(f"用户未输入，使用默认值: {user_input}")
+                    
                     proc.stdin.write(f"{user_input}\n".encode())
                     await proc.stdin.drain()
                     buffer = ''
@@ -237,15 +273,6 @@ async def powershell_command(command: str) -> str:
     else:
         error_msg = stderr or "未知错误"
         return f"命令执行失败（错误码 {proc.returncode}）:\n{error_msg}"
-
-
-# 2. 新增异步输入函数
-async def get_user_input_async(prompt: str) -> str:
-    """异步获取用户输入"""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: input(prompt))
-
-
 
 
 def get_weather(city: str) -> str:
@@ -314,17 +341,48 @@ def ssh(command:str)->str:
 # 3. 工具描述
 tools = [
     {
-        "type":"function",
-        "function":{
-           "name":"ssh",
-            "description":"管理远程ubuntu服务器",
-            "parameters":{
-                "type":"object",
-                "properties":{
-                    "command":{
-
-                        "type":"string",
-                        "description":"输入ubuntu服务器的命令"
+        "type": "function",
+        "function": {
+            "name": "clear_context",
+            "description": "清除对话历史上下文，只保留系统消息",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "user_input",
+            "description": "当需要用户提供额外信息或确认时使用此工具，将暂停执行并使用语音方式等待用户输入",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "向用户展示的提示信息，会通过语音读出"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "等待用户输入的最大秒数，默认60秒"
+                    }
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ssh",
+            "description": "管理远程ubuntu服务器",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "输入ubuntu服务器的命令"
                     }
                 },
                 "required": ["command"]
@@ -386,24 +444,24 @@ tools = [
         "type": "function",
         "function": {
             "name": "email_check",
-            "description":"查看邮箱收件箱邮件列表并且获取邮件id",
+            "description": "查看邮箱收件箱邮件列表并且获取邮件id",
             "parameters": {
                 "type": "object",
                 "properties": {}
             }
         }
     },
-{
+    {
         "type": "function",
         "function": {
             "name": "email_details",
-            "description":"查看该id的邮件的详细内容",
+            "description": "查看该id的邮件的详细内容",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "email_id": {
-                        "type":"string",
-                        "description":"输入在email_check里面获取到的指定邮件id"
+                        "type": "string",
+                        "description": "输入在email_check里面获取到的指定邮件id"
                     }
                 }
             }
@@ -434,51 +492,41 @@ tools = [
         "type": "function",
         "function": {
             "name": "send_mail",
-            "description":"发送一封邮件向指定邮箱",
+            "description": "发送一封邮件向指定邮箱",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "receiver": {
                         "type": "string",
-                        "description":"收件人邮箱，请严格查看收件人邮箱是否是正确的邮箱格式"
+                        "description": "收件人邮箱，请严格查看收件人邮箱是否是正确的邮箱格式"
                     },
-                    "subject":{
+                    "subject": {
                         "type": "string",
-                        "description":"邮件主题"
+                        "description": "邮件主题"
                     },
                     "text": {
                         "type": "string",
-                        "description":"邮件的内容  (用html的模板编写以避免编码问题)"
+                        "description": "邮件的内容  (用html的模板编写以避免编码问题)"
                     }
                 },
-                "required": ["receiver","subject","text"]
-            }
-        }
-    },{
-        "type": "function",
-        "function": {
-            "name":"R1_opt",
-            "description":"调用深度思考模型r1来解决棘手问题",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "message": {
-                        "type": "string",
-                        "description":"输入棘手的问题"
-                    }
-                },
-                "required": ["message"]
+                "required": ["receiver", "subject", "text"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "clear_context",
-            "description": "清除对话历史上下文，只保留系统消息",
+            "name": "R1_opt",
+            "description": "调用深度思考模型r1来解决棘手问题",
             "parameters": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "输入棘手的问题"
+                    }
+                },
+                "required": ["message"]
             }
         }
     },
@@ -610,6 +658,16 @@ task_planning_system_message = {
 - 错误检测与自动修复
 - 持续尝试与备选方案
 - 结果验证与确认
+
+用户交互指南：
+- 当你需要用户提供更多信息时，使用user_input工具请求输入
+- 适合使用user_input的场景：
+  1. 需要用户确认某个重要决定（如删除文件、修改配置）
+  2. 需要用户提供任务中缺失的信息（如文件名、目标路径等）
+  3. 有多个可能的解决方案，需要用户选择
+  4. 任务执行过程中出现意外情况，需要用户提供指导
+- 使用清晰具体的提示语，告诉用户需要提供什么信息
+- 设置合理的超时时间，避免长时间等待
 """
 }
 
@@ -798,6 +856,12 @@ async def execute_task_with_planning(user_input, messages_history):
                                     result = code_tools.read_code(args["file_name"])
                                 elif func_name == "create_module":
                                     result = code_tools.create_module(args["module_name"], args["functions_json"])
+                                elif func_name == "user_input":
+                                    # 新增工具: 请求用户输入
+                                    prompt = args.get("prompt", "请提供更多信息：")
+                                    timeout = args.get("timeout", 60)
+                                    user_input = await get_user_input_async(prompt, timeout)
+                                    result = f"用户输入: {user_input}" if user_input else "用户未提供输入（超时）"
                                 else:
                                     raise ValueError(f"未定义的工具调用: {func_name}")
                                 
