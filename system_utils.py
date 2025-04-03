@@ -315,40 +315,44 @@ async def powershell_command(command: str) -> str:
         
     interaction_info = f"命令执行过程中有{interaction_count}次交互" if interaction_count > 0 else ""
 
-    # 只有在有实际输出且执行成功的情况下才调用LLM进行摘要
+    # 只有在有实际输出且执行成功的情况下进行处理
     if proc.returncode == 0 and stdout:
-        try:
-            # 给LLM的提示语
-            prompt = f"""
-            请简洁总结以下命令执行结果，突出重要信息，忽略冗余内容：
-            命令: {command}
-            {garbled_warning}
-            {interaction_info}
-            输出:
-            {stdout[:4000] if len(stdout) > 4000 else stdout}
+        # 检查输出长度是否超过5000字符
+        if len(stdout) > 5000:
+            try:
+                # 给LLM的提示语
+                prompt = f"""
+                请简洁总结以下命令执行结果，突出重要信息，忽略冗余内容：
+                命令: {command}
+                {garbled_warning}
+                {interaction_info}
+                输出:
+                {stdout[:4000] if len(stdout) > 4000 else stdout}
 
-            如果发现中文乱码，请在总结中明确指出，并尝试猜测可能的文件名或内容。
-            """
+                如果发现中文乱码，请在总结中明确指出，并尝试猜测可能的文件名或内容。
+                """
 
-            # 调用LLM进行摘要
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
+                # 调用LLM进行摘要
+                response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3
+                )
 
-            summary = response.choices[0].message.content
-            # 返回完整的命令输出和LLM摘要
-            return f"""
-## 命令执行成功 (完整输出):
-{stdout}
+                summary = response.choices[0].message.content
+                # 返回LLM摘要，不包含完整输出
+                return f"""
+## 命令执行成功 (输出超过5000字符，已生成摘要):
 
 ## LLM摘要:
 {summary}
 """
-        except Exception as e:
-            # LLM调用失败时返回原始输出
-            return f"执行成功 (LLM摘要失败: {str(e)}):\n{stdout}"
+            except Exception as e:
+                # LLM调用失败时返回原始输出
+                return f"执行成功 (输出较长，LLM摘要失败: {str(e)}):\n{stdout[:1000]}...(输出过长，已截断)"
+        else:
+            # 输出少于5000字符，直接返回原始输出
+            return f"## 命令执行成功:\n{stdout}"
     elif proc.returncode == 0:
         return f"命令执行成功（无输出）{interaction_info}"
     else:
@@ -639,40 +643,44 @@ async def cmd_command(command: str) -> str:
         
     interaction_info = f"命令执行过程中有{interaction_count}次交互" if interaction_count > 0 else ""
 
-    # 只有在有实际输出且执行成功的情况下才调用LLM进行摘要
+    # 只有在有实际输出且执行成功的情况下进行处理
     if proc.returncode == 0 and stdout:
-        try:
-            # 给LLM的提示语
-            prompt = f"""
-            请简洁总结以下命令执行结果，突出重要信息，忽略冗余内容：
-            命令: {command}
-            {garbled_warning}
-            {interaction_info}
-            输出:
-            {stdout[:4000] if len(stdout) > 4000 else stdout}
+        # 检查输出长度是否超过5000字符
+        if len(stdout) > 5000:
+            try:
+                # 给LLM的提示语
+                prompt = f"""
+                请简洁总结以下命令执行结果，突出重要信息，忽略冗余内容：
+                命令: {command}
+                {garbled_warning}
+                {interaction_info}
+                输出:
+                {stdout[:4000] if len(stdout) > 4000 else stdout}
 
-            如果发现中文乱码，请在总结中明确指出，并尝试猜测可能的文件名或内容。
-            """
+                如果发现中文乱码，请在总结中明确指出，并尝试猜测可能的文件名或内容。
+                """
 
-            # 调用LLM进行摘要
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
+                # 调用LLM进行摘要
+                response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3
+                )
 
-            summary = response.choices[0].message.content
-            # 返回完整的命令输出和LLM摘要
-            return f"""
-## 命令执行成功 (完整输出):
-{stdout}
+                summary = response.choices[0].message.content
+                # 返回LLM摘要，不包含完整输出
+                return f"""
+## 命令执行成功 (输出超过5000字符，已生成摘要):
 
 ## LLM摘要:
 {summary}
 """
-        except Exception as e:
-            # LLM调用失败时返回原始输出
-            return f"执行成功 (LLM摘要失败: {str(e)}):\n{stdout}"
+            except Exception as e:
+                # LLM调用失败时返回原始输出
+                return f"执行成功 (输出较长，LLM摘要失败: {str(e)}):\n{stdout[:1000]}...(输出过长，已截断)"
+        else:
+            # 输出少于5000字符，直接返回原始输出
+            return f"## 命令执行成功:\n{stdout}"
     elif proc.returncode == 0:
         return f"命令执行成功（无输出）{interaction_info}"
     else:

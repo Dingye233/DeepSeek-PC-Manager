@@ -6,8 +6,10 @@
   <component name="ChangeListManager">
     <list default="true" id="1c3a9118-83e2-4649-a0d9-60f95eae1c46" name="更改" comment="Auto update by PC-Agent at 2025-04-03 02:11:42">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/aaaa.py" beforeDir="false" afterPath="$PROJECT_DIR$/aaaa.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/deepseekAPI.py" beforeDir="false" afterPath="$PROJECT_DIR$/deepseekAPI.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/system_utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -256,7 +258,7 @@
       <workItem from="1743589122718" duration="94000" />
       <workItem from="1743591930238" duration="8028000" />
       <workItem from="1743617731175" duration="1816000" />
-      <workItem from="1743649295388" duration="1753000" />
+      <workItem from="1743649295388" duration="2991000" />
     </task>
     <servers />
   </component>
