@@ -125,6 +125,48 @@ async def execute_task_with_planning(user_input, messages_history):
                 last_progress = 0
                 progress_history = []  # 记录历次进度，仅用于显示和参考
                 
+                # 定义询问用户是否继续尝试的函数
+                async def ask_user_to_continue(messages):
+                    """询问用户是否继续尝试任务，即使智能体认为无法完成"""
+                    try:
+                        user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望：\n1. 继续尝试解决问题\n2. 终止任务\n请输入选择(1/2): ", 60)
+                        
+                        if user_choice == "1":
+                            # 用户选择继续尝试
+                            print_info("\n用户选择继续尝试解决问题。")
+                            
+                            # 重置任务失败标记
+                            nonlocal is_task_complete
+                            is_task_complete = False
+                            
+                            # 添加用户反馈到对话
+                            messages.append({
+                                "role": "user", 
+                                "content": "用户希望继续尝试解决问题，即使看起来很困难。请采用全新思路，尝试替代方案或更简单的途径达成目标。不要轻易放弃，尽可能找到创新的解决方法。请直接开始执行，无需解释。"
+                            })
+                            
+                            # 发送继续尝试的消息到GUI
+                            if 'message_queue' in globals():
+                                message_queue.put({
+                                    "type": "tool_result",
+                                    "text": "用户选择继续尝试解决问题"
+                                })
+                            
+                            return False, False  # 不终止任务，不失败
+                        else:
+                            # 用户确认终止
+                            print_warning("\n用户确认终止任务。")
+                            return True, True  # 终止任务，标记失败
+                    except Exception as e:
+                        # 获取用户输入失败时的处理
+                        print_error(f"获取用户输入失败: {str(e)}，默认继续尝试")
+                        # 默认继续尝试而非终止
+                        messages.append({
+                            "role": "user", 
+                            "content": "尽管任务看起来很困难，但我们需要继续尝试。请采用全新思路寻找解决方案。"
+                        })
+                        return False, False  # 不终止任务，不失败
+                
                 # 内部递归验证循环
                 while recursive_verify_count < max_recursive_verify and not is_task_complete:
                     recursive_verify_count += 1
@@ -494,10 +536,15 @@ async def execute_task_with_planning(user_input, messages_history):
                             
                             # 只有在明确确认失败的情况下才标记为失败
                             if "确认任务无法完成" in confirm_result:
-                                is_task_complete = True  # 虽然失败但任务结束
-                                task_failed = True
-                                print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
-                                break
+                                # 询问用户是否继续尝试
+                                should_complete, should_fail = await ask_user_to_continue(current_execution_messages)
+                                if should_complete:
+                                    is_task_complete = True  # 虽然失败但任务结束
+                                    task_failed = True
+                                    print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
+                                    break
+                                else:
+                                    continue  # 用户选择继续尝试
                         elif "任务已完成" in verify_result or "任务完成" in verify_result:
                             is_task_complete = True
                             task_completed = True
@@ -533,10 +580,15 @@ async def execute_task_with_planning(user_input, messages_history):
                             
                             # 只有在明确确认失败的情况下才标记为失败
                             if "确认任务无法完成" in confirm_result:
-                                is_task_complete = True  # 虽然失败但任务结束
-                                task_failed = True
-                                print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
-                                break
+                                # 询问用户是否继续尝试
+                                should_complete, should_fail = await ask_user_to_continue(current_execution_messages)
+                                if should_complete:
+                                    is_task_complete = True  # 虽然失败但任务结束
+                                    task_failed = True
+                                    print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
+                                    break
+                                else:
+                                    continue  # 用户选择继续尝试
                         elif "部分完成" in verify_result and "100%" not in verify_result:
                             # 任务部分完成但达到了可接受的状态
                             if "可接受" in verify_result or "已满足需求" in verify_result or "基本满足" in verify_result:
