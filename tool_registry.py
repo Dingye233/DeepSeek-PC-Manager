@@ -84,7 +84,7 @@ def get_tools():
                     "properties": {
                         "command": {
                             "type": "string",
-                            "description": "要执行的PowerShell命令。推荐一次执行单条命令，避免使用;分隔符连接多条命令，复杂任务应拆分为多个独立命令逐步执行。工具会智能处理需要用户确认的情况，无需手动添加-Force等参数。"
+                            "description": "要执行的PowerShell命令。工具会智能处理需要用户确认的情况"
                         }
                     },
                     "required": ["command"]
@@ -101,7 +101,7 @@ def get_tools():
                     "properties": {
                         "command": {
                             "type": "string",
-                            "description": "要执行的CMD命令。推荐一次执行单条命令，避免使用&分隔符连接多条命令，复杂任务应拆分为多个独立命令逐步执行。工具会智能处理需要用户确认的情况，无需手动添加/Y等参数。"
+                            "description": "要执行的CMD命令。工具会智能处理需要用户确认的情况"
                         }
                     },
                     "required": ["command"]
