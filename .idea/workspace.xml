@@ -5,6 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1c3a9118-83e2-4649-a0d9-60f95eae1c46" name="更改" comment="Auto update by PC-Agent at 2025-04-03 02:11:42">
+      <change afterPath="$PROJECT_DIR$/deepseekAPI.py.bak" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deepseekAPI.py.bak2" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/aaaa.py" beforeDir="false" afterPath="$PROJECT_DIR$/aaaa.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/deepseekAPI.py" beforeDir="false" afterPath="$PROJECT_DIR$/deepseekAPI.py" afterDir="false" />
@@ -265,7 +268,7 @@
       <workItem from="1743678955520" duration="6695000" />
       <workItem from="1743700723962" duration="279000" />
       <workItem from="1743737196839" duration="998000" />
-      <workItem from="1743741224946" duration="831000" />
+      <workItem from="1743741224946" duration="1397000" />
     </task>
     <servers />
   </component>
@@ -297,7 +300,7 @@
     <SUITE FILE_PATH="coverage/PC_Agent_V1$aaaa.coverage" NAME="aaaa 覆盖结果" MODIFIED="1743737488781" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$browser_agent.coverage" NAME="browser_agent 覆盖结果" MODIFIED="1738337500079" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$example.coverage" NAME="example 覆盖结果" MODIFIED="1737793319679" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/PC_Agent_V1$deepseekAPI.coverage" NAME="deepseekAPI 覆盖结果" MODIFIED="1743741254971" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/PC_Agent_V1$deepseekAPI.coverage" NAME="deepseekAPI 覆盖结果" MODIFIED="1743742338243" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$python_tools.coverage" NAME="python_tools 覆盖结果" MODIFIED="1737793314863" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$browser_agent_v2.coverage" NAME="browser_agent_v2 覆盖结果" MODIFIED="1738337386965" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/PC_Agent_V1$ssh_controller.coverage" NAME="ssh_controller 覆盖结果" MODIFIED="1738777834675" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />

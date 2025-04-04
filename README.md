@@ -225,7 +225,7 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 
 ## 最近更新
 
-### 2023年5月更新
+### 2025年3月更新
 
 1. **用户确认任务失败机制**
    - 新增智能体任务失败前的用户确认步骤
@@ -318,8 +318,8 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 
 如有问题或建议，请通过以下方式联系我们：
 
-- 邮箱: support@deepseek-pc.example.com
-- GitHub: https://github.com/yourusername/deepseek-pc-manager
+- 邮箱: 1792491376@qq.com
+- GitHub: https://github.com/Dingye233
 
 ---
 
