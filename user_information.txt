@@ -1,0 +1,13 @@
+用户关键信息表:user_information.txt
+用户的家在湖州市南浔区
+用户的学校在杭州市钱塘区
+用户id叫dingye233
+用户的github仓库地址https://github.com/Dingye233/DeepSeek-PC-Manager
+本项目的本地地址是D:\Projects\PC-Agent-V1
+本项目分支是master
+用户邮箱是1792491376@qq.com
+此设备的桌面在C:\Users\17924\Desktop 软件的快捷方式一般都在这里
+用户通讯录列表:
+1号联系人:2690119214@qq.com
+2号联系人:1685534874@qq.com
+3号联系人:1470863980@qq.com

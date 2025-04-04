@@ -30,13 +30,18 @@ client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepsee
 
 
 messages = [{"role": "system","content": " 你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: "+user_information_read()}, 
-{"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "}]
+{"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 3.对于涉及数据增删查改、批量处理、文件处理等复杂任务，优先考虑使用Python脚本而非直接Shell命令，这样更安全高效且易于维护 4.创建脚本时确保使用合适的异常处理和备份机制 5.对于重复性操作或影响多个文件的操作，应该编写Python脚本而非手动执行命令 6.所有任务中创建的文件和脚本都应放在workspace文件夹下，如果该文件夹不存在则应先创建它"}]
 
 # 将ask_user_to_continue函数从嵌套函数移到全局作用域
 async def ask_user_to_continue(conversation_messages, is_task_complete=None):
     """询问用户是否继续尝试任务，即使智能体认为无法完成"""
     try:
+        print_highlight("\n===== 等待用户决策 =====")
+        print_highlight("请输入您的想法或指示，按回车键提交")
+        print_highlight("===========================")
+        
         user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？\n(输入您的想法或指示，不限于简单的继续/终止选择): ", 120)
+        
         # 如果用户输入超时返回None
         if user_choice is None:
             print_warning("用户输入超时，默认继续尝试任务")
@@ -51,6 +56,7 @@ async def ask_user_to_continue(conversation_messages, is_task_complete=None):
         if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
             # 用户选择继续尝试或提供了其他建议
             print_info(f"\n用户输入: {user_choice}")
+            print_success("已接收用户输入，继续执行任务")
             
             # 重置任务失败标记（如果提供了is_task_complete参数）
             if is_task_complete is not None:
@@ -87,6 +93,9 @@ task_planning_system_message = {
 3. 不要提供具体命令、代码、参数等执行细节
 4. 不要使用具体的文件路径或文件名
 5. 不要猜测用户环境和系统配置
+6. 对于涉及数据增删查改、批量文件处理、重复性操作等任务，在规划中应该倾向于使用Python脚本而非直接执行shell命令
+7. 在任务涉及多个文件操作时，应该考虑使用Python脚本的可靠性和安全性优势
+8. 所有任务创建的文件和脚本都应放在workspace文件夹中，如果不存在应先创建
 
 执行方式：
 - 任务拆解应限制在3-5个高级步骤
@@ -94,7 +103,8 @@ task_planning_system_message = {
 - 不要提供具体工具选择的建议
 - 不要假设任何环境配置
 - 提供简短的目标描述，而非执行说明
-
+- 对于文件操作、数据处理等任务，考虑使用Python脚本的可行性，尤其是涉及到多个文件或需要重复执行的任务
+- 规划时考虑使用workspace文件夹存放生成的文件，确保结构清晰
 
 任务分析完成后，agent会自行确定具体执行步骤、选择适当工具，并执行必要操作。你的任务只是提供高层次指导，而非执行细节。
 """
@@ -178,7 +188,10 @@ async def execute_task_with_planning(user_input, messages_history):
                 execution_prompt = f"""现在开始执行任务计划的第{attempt+1}次尝试。
 基于上述高层次目标，请自行确定具体执行步骤并调用适当的工具。
 不要解释你将如何执行，直接调用工具执行必要操作。
-每次只执行一个具体步骤，等待结果后再决定下一步。"""
+每次只执行一个具体步骤，等待结果后再决定下一步。
+对于数据增删查改、批量处理、文件操作等任务，请优先考虑编写和使用Python脚本而非直接执行shell命令，这样更安全和可靠。
+当需要处理多个文件、进行重复性操作或复杂数据处理时，应创建Python脚本而非执行一系列命令。
+所有任务创建的文件和脚本都应放在workspace文件夹中，如果该文件夹不存在，请首先创建它。"""
 
                 if attempt > 0:
                     execution_prompt += f" 这是第{attempt+1}次尝试，前面{attempt}次尝试失败。请根据之前的错误调整策略。"
@@ -259,13 +272,13 @@ async def execute_task_with_planning(user_input, messages_history):
                                 elif func_name == "get_weather":
                                     result = get_weather(args["city"])
                                 elif func_name == "powershell_command":
-                                    # 执行原始命令
-                                    cmd_result = await powershell_command(args["command"])
-                                    result = cmd_result
+                                    # 执行原始命令，支持timeout参数
+                                    timeout = args.get("timeout", 60)  # 从args中获取timeout参数，如果没有则使用默认值60秒
+                                    result = await powershell_command(args["command"], timeout)
                                 elif func_name == "cmd_command":
-                                    # 执行CMD命令
-                                    cmd_result = await cmd_command(args["command"])
-                                    result = cmd_result
+                                    # 执行CMD命令，支持timeout参数
+                                    timeout = args.get("timeout", 60)  # 从args中获取timeout参数，如果没有则使用默认值60秒
+                                    result = await cmd_command(args["command"], timeout)
                                 elif func_name == "email_check":
                                     result = get_email.retrieve_emails()
                                 elif func_name == "email_details":
@@ -1013,9 +1026,13 @@ async def execute_simple_task(user_input, messages_history):
                         elif func_name == "get_weather":
                             result = get_weather(args["city"])
                         elif func_name == "powershell_command":
-                            result = await powershell_command(args["command"])
+                            # 执行原始命令，支持timeout参数
+                            timeout = args.get("timeout", 60)  # 从args中获取timeout参数，如果没有则使用默认值60秒
+                            result = await powershell_command(args["command"], timeout)
                         elif func_name == "cmd_command":
-                            result = await cmd_command(args["command"])
+                            # 执行CMD命令，支持timeout参数
+                            timeout = args.get("timeout", 60)  # 从args中获取timeout参数，如果没有则使用默认值60秒
+                            result = await cmd_command(args["command"], timeout)
                         elif func_name == "email_check":
                             result = get_email.retrieve_emails()
                         elif func_name == "email_details":
@@ -1245,7 +1262,7 @@ async def execute_simple_task(user_input, messages_history):
                 "role": "user", 
                 "content": f"执行过程中发生错误: {error_msg}。请调整策略，尝试其他方法继续执行任务。"
             })
-            
+        
         # 增加迭代计数
         iteration += 1
     

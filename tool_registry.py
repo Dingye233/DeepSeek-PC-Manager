@@ -87,6 +87,10 @@ def get_tools():
                         "command": {
                             "type": "string",
                             "description": "要执行的PowerShell命令。工具会智能处理需要用户确认的情况"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "命令执行的最大超时时间（秒），默认60秒。对于复杂或需要长时间运行的命令，应设置更长的超时时间"
                         }
                     },
                     "required": ["command"]
@@ -104,6 +108,10 @@ def get_tools():
                         "command": {
                             "type": "string",
                             "description": "要执行的CMD命令。工具会智能处理需要用户确认的情况"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "命令执行的最大超时时间（秒），默认60秒。对于复杂或需要长时间运行的命令，应设置更长的超时时间"
                         }
                     },
                     "required": ["command"]
