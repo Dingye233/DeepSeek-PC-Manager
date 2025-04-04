@@ -5,6 +5,7 @@ import asyncio
 import os
 import get_email
 import re
+from queue import Queue
 import python_tools
 import send_email
 import ssh_controller
@@ -24,6 +25,7 @@ from console_utils import print_color, print_success, print_error, print_warning
 from system_utils import powershell_command, list_directory, cmd_command
 
 load_dotenv()
+message_queue = Queue()
 
 # 使用集中的工具注册
 tools = tool_registry.get_tools()
@@ -33,53 +35,6 @@ client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepsee
 
 messages = [{"role": "system","content": " 你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: "+user_information_read()}, 
 {"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 "}]
-
-# 将ask_user_to_continue函数从嵌套函数移到全局作用域
-async def ask_user_to_continue(conversation_messages, is_task_complete=None):
-    """询问用户是否继续尝试任务，即使智能体认为无法完成"""
-    try:
-        user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？\n(输入您的想法或指示，不限于简单的继续/终止选择): ", 120)
-        
-        # 如果用户输入超时返回None
-        if user_choice is None:
-            print_warning("用户输入超时，默认继续尝试任务")
-            # 默认继续尝试而非终止
-            conversation_messages.append({
-                "role": "user", 
-                "content": "用户输入超时，系统默认继续尝试。请采用全新思路寻找解决方案。"
-            })
-            
-            return "继续尝试"  # 返回默认值表示继续尝试
-        
-        if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
-            # 用户选择继续尝试或提供了其他建议
-            print_info(f"\n用户输入: {user_choice}")
-            
-            # 重置任务失败标记（如果提供了is_task_complete参数）
-            if is_task_complete is not None:
-                is_task_complete = False
-            
-            # 添加用户反馈到对话
-            conversation_messages.append({
-                "role": "user", 
-                "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
-            })
-            
-            return user_choice  # 直接返回用户输入
-        else:
-            # 用户确认终止
-            print_warning("\n用户选择终止任务。")
-            return user_choice  # 直接返回用户输入
-    except Exception as e:
-        # 获取用户输入失败时的处理
-        print_error(f"获取用户输入失败: {str(e)}，默认继续尝试")
-        # 默认继续尝试而非终止
-        conversation_messages.append({
-            "role": "user", 
-            "content": "尽管任务看起来很困难，但我们需要继续尝试。请采用全新思路寻找解决方案。"
-        })
-        
-        return "继续尝试"  # 返回默认值表示继续尝试
 
 # 添加任务规划和错误修复
 task_planning_system_message = {
@@ -198,6 +153,48 @@ async def execute_task_with_planning(user_input, messages_history):
                 r1_call_count = 0  # 仅用于显示信息，不作为终止判断依据
                 last_progress = 0
                 progress_history = []  # 记录历次进度，仅用于显示和参考
+                
+                # 定义询问用户是否继续尝试的函数
+                async def ask_user_to_continue(conversation_messages):
+                    """询问用户是否继续尝试任务，即使智能体认为无法完成"""
+                    try:
+                        user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？\n(输入您的想法或指示，不限于简单的继续/终止选择): ", 120)
+                        
+                        if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
+                            # 用户选择继续尝试或提供了其他建议
+                            print_info(f"\n用户输入: {user_choice}")
+                            
+                            # 重置任务失败标记
+                            nonlocal is_task_complete
+                            is_task_complete = False
+                            
+                            # 添加用户反馈到对话
+                            conversation_messages.append({
+                                "role": "user", 
+                                "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
+                            })
+                            
+                            # 发送继续尝试的消息到GUI
+                            if 'message_queue' in globals():
+                                message_queue.put({
+                                    "type": "tool_result",
+                                    "text": f"收到用户反馈: {user_choice}"
+                                })
+                            
+                            return user_choice  # 直接返回用户输入
+                        else:
+                            # 用户确认终止
+                            print_warning("\n用户选择终止任务。")
+                            return user_choice  # 直接返回用户输入
+                    except Exception as e:
+                        # 获取用户输入失败时的处理
+                        print_error(f"获取用户输入失败: {str(e)}，默认继续尝试")
+                        # 默认继续尝试而非终止
+                        conversation_messages.append({
+                            "role": "user", 
+                            "content": "尽管任务看起来很困难，但我们需要继续尝试。请采用全新思路寻找解决方案。"
+                        })
+                        return "继续尝试"  # 返回默认值表示继续尝试
                 
                 # 内部递归验证循环
                 while recursive_verify_count < max_recursive_verify and not is_task_complete:
@@ -415,6 +412,10 @@ async def execute_task_with_planning(user_input, messages_history):
                                         messages_history.append({"role": "user", "content": user_input})
                                         messages_history.append({"role": "assistant", "content": summary})
                                         
+                                        if 'message_queue' in globals():
+                                            message_queue.put({"type": "assistant", "text": summary})
+                                            message_queue.put({"type": "complete"})
+                                        
                                         return summary
                                 
                                 # 分析执行结果是否有错误
@@ -425,6 +426,13 @@ async def execute_task_with_planning(user_input, messages_history):
                                     
                                     # 将错误信息添加到结果中
                                     result = f"{result}\n\n分析: {error_info['analysis']}"
+                                    
+                                    # 发送错误信息到GUI
+                                    if 'message_queue' in globals():
+                                        message_queue.put({
+                                            "type": "error",
+                                            "text": f"工具 {func_name} 执行出错: {error_info['analysis']}"
+                                        })
                             
                             except Exception as e:
                                 error_msg = f"工具执行失败: {str(e)}"
@@ -435,6 +443,8 @@ async def execute_task_with_planning(user_input, messages_history):
                                 print_error("========================\n")
                                 result = error_msg
                                 step_success = False
+                                
+                                # 发送错误到GUI
                             
                             tool_outputs.append({
                                 "tool_call_id": tool_call.id,
@@ -626,17 +636,14 @@ async def execute_task_with_planning(user_input, messages_history):
                             # 只有在明确确认失败的情况下才标记为失败
                             if "确认任务无法完成" in confirm_result:
                                 # 询问用户是否继续尝试
-                                should_continue = await ask_user_to_continue(current_execution_messages, is_task_complete)
-                                # 检查should_continue的值，如果是None（输入超时）或者用户选择继续（不是终止命令）
-                                if should_continue is None or (should_continue and should_continue.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]):
-                                    # 用户选择继续或超时默认继续
-                                    continue  # 用户选择继续尝试
-                                else:
-                                    # 用户明确选择终止
+                                should_continue = await ask_user_to_continue(current_execution_messages)
+                                if should_continue and should_continue.strip().lower() in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
                                     is_task_complete = True  # 虽然失败但任务结束
                                     task_failed = True
                                     print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
                                     break
+                                else:
+                                    continue  # 用户选择继续尝试
                         elif "任务已完成" in verify_result or "任务完成" in verify_result:
                             is_task_complete = True
                             task_completed = True
@@ -673,17 +680,14 @@ async def execute_task_with_planning(user_input, messages_history):
                             # 只有在明确确认失败的情况下才标记为失败
                             if "确认任务无法完成" in confirm_result:
                                 # 询问用户是否继续尝试
-                                should_continue = await ask_user_to_continue(current_execution_messages, is_task_complete)
-                                # 检查should_continue的值，如果是None（输入超时）或者用户选择继续（不是终止命令）
-                                if should_continue is None or (should_continue and should_continue.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]):
-                                    # 用户选择继续或超时默认继续
-                                    continue  # 用户选择继续尝试
-                                else:
-                                    # 用户明确选择终止
+                                should_continue = await ask_user_to_continue(current_execution_messages)
+                                if should_continue and should_continue.strip().lower() in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
                                     is_task_complete = True  # 虽然失败但任务结束
                                     task_failed = True
                                     print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
                                     break
+                                else:
+                                    continue  # 用户选择继续尝试
                         elif "部分完成" in verify_result and "100%" not in verify_result:
                             # 任务部分完成但达到了可接受的状态
                             if "可接受" in verify_result or "已满足需求" in verify_result or "基本满足" in verify_result:
@@ -786,6 +790,11 @@ async def execute_task_with_planning(user_input, messages_history):
                     messages_history.append({"role": "user", "content": user_input})
                     messages_history.append({"role": "assistant", "content": summary})
                     
+                    # 发送总结到GUI
+                    if 'message_queue' in globals():
+                        message_queue.put({"type": "assistant", "text": summary})
+                        message_queue.put({"type": "complete"})
+                    
                     return summary
                 else:
                     # 任务在内部递归中未完成，添加错误反馈
@@ -812,6 +821,28 @@ async def execute_task_with_planning(user_input, messages_history):
                     
                     # 添加错误分析到对话历史
                     planning_messages.append({"role": "assistant", "content": error_analysis})
+                    
+                    # 发送错误分析到GUI
+                    if 'message_queue' in globals():
+                        message_queue.put({
+                            "type": "tool_result",
+                            "text": f"分析错误并重试（尝试 {attempt+1}/{max_attempts}）"
+                        })
+                    
+                    # 如果是最后一次尝试，返回失败
+                    if attempt == max_attempts - 1:
+                        failure_message = f"在{max_attempts}次尝试后，任务执行失败。以下是最终分析：\n\n{error_analysis}"
+                        
+                        # 添加到主对话历史
+                        messages_history.append({"role": "user", "content": user_input})
+                        messages_history.append({"role": "assistant", "content": failure_message})
+                        
+                        # 发送失败消息到GUI
+                        if 'message_queue' in globals():
+                            message_queue.put({"type": "assistant", "text": failure_message})
+                            message_queue.put({"type": "complete"})
+                        
+                        return failure_message
                     
             except Exception as e:
                 print_error(f"\n===== 执行错误 =====")
@@ -916,8 +947,10 @@ async def main(input_message: str):
             return assistant_message
 
     except Exception as e:
-        # 错误处理
+        # 将错误信息发送到GUI队列
         error_msg = f"API错误: {str(e)}"
+        if 'message_queue' in globals():
+            message_queue.put({"type": "error", "text": error_msg})
         
         print_error(f"常规对话失败: {error_msg}")
         print_info("切换到任务规划系统...")
@@ -1093,7 +1126,14 @@ async def execute_simple_task(user_input, messages_history):
                             "tool_call_id": tool_call.id,
                             "content": error_msg
                         })
-                    
+                        
+                        # 发送错误到GUI
+                        if 'message_queue' in globals():
+                            message_queue.put({
+                                "type": "error",
+                                "text": error_msg
+                            })
+                
                 # 工具执行后，要求模型评估任务状态
                 assessment_prompt = """
                 请分析刚刚执行的工具结果，并回答以下问题：
@@ -1155,6 +1195,11 @@ async def execute_simple_task(user_input, messages_history):
                     messages_history.append({"role": "user", "content": user_input})
                     messages_history.append({"role": "assistant", "content": summary})
                     
+                    # 发送到GUI
+                    if 'message_queue' in globals():
+                        message_queue.put({"type": "assistant", "text": summary})
+                        message_queue.put({"type": "complete"})
+                    
                     return summary
                 
                 elif "[任务失败]" in assessment_result:
@@ -1162,26 +1207,23 @@ async def execute_simple_task(user_input, messages_history):
                     try:
                         user_choice = await ask_user_to_continue(planning_messages)
                         
-                        if user_choice is None or (user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]):
-                            # 用户选择继续尝试、输入超时或提供了其他建议
-                            if user_choice is None:
-                                print_info("\n用户输入超时，系统默认继续尝试")
-                                
-                                # 添加系统默认决策到对话
-                                planning_messages.append({
-                                    "role": "user", 
-                                    "content": "用户输入超时，系统默认继续尝试。请采用全新思路寻找解决方案。"
+                        if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
+                            # 用户选择继续尝试或提供了其他建议
+                            print_info(f"\n用户输入: {user_choice}")
+                            
+                            # 添加用户反馈到对话
+                            planning_messages.append({
+                                "role": "user", 
+                                "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
+                            })
+                            
+                            # 发送继续尝试的消息到GUI
+                            if 'message_queue' in globals():
+                                message_queue.put({
+                                    "type": "tool_result",
+                                    "text": f"收到用户反馈: {user_choice}"
                                 })
-                                
-                            else:
-                                print_info(f"\n用户输入: {user_choice}")
-                                
-                                # 添加用户反馈到对话
-                                planning_messages.append({
-                                    "role": "user", 
-                                    "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
-                                })
-                                
+                            
                             continue  # 继续执行任务
                         else:
                             # 用户确认终止
@@ -1195,6 +1237,11 @@ async def execute_simple_task(user_input, messages_history):
                             messages_history.append({"role": "user", "content": user_input})
                             messages_history.append({"role": "assistant", "content": f"任务执行失败: {failure_reason}"})
                             
+                            # 发送到GUI
+                            if 'message_queue' in globals():
+                                message_queue.put({"type": "assistant", "text": f"任务执行失败: {failure_reason}"})
+                                message_queue.put({"type": "complete"})
+                            
                             return f"任务执行失败: {failure_reason}"
                     except Exception as e:
                         # 获取用户输入失败时的处理
@@ -1205,7 +1252,6 @@ async def execute_simple_task(user_input, messages_history):
                             "role": "user", 
                             "content": "尽管任务看起来很困难，但我们需要继续尝试。请采用全新思路寻找解决方案。"
                         })
-                        
                         continue
                 
                 # 如果任务需要继续执行，添加执行提示
@@ -1269,6 +1315,11 @@ async def execute_simple_task(user_input, messages_history):
     # 更新主对话消息
     messages_history.append({"role": "user", "content": user_input})
     messages_history.append({"role": "assistant", "content": summary})
+    
+    # 发送到GUI
+    if 'message_queue' in globals():
+        message_queue.put({"type": "assistant", "text": summary})
+        message_queue.put({"type": "complete"})
     
     return summary
 

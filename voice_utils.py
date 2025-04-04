@@ -5,6 +5,7 @@ import speech_recognition as sr
 from tts_http_demo import tts_volcano, tts_play
 from playsound import playsound
 import tempfile
+from console_utils import print_info, print_warning, print_error, print_success
 
 def tts(text: str):
     """
@@ -15,7 +16,7 @@ def tts(text: str):
         # 尝试使用tts_play函数(在tts_http_demo.py中定义)
         return tts_play(text)
     except Exception as e:
-        print(f"文本转语音失败: {str(e)}")
+        print_error(f"文本转语音失败: {str(e)}")
         raise
 
 def recognize_speech() -> str:
@@ -27,7 +28,7 @@ def recognize_speech() -> str:
     api_key = os.getenv("sttkey")
     
     if not api_key:
-        print("错误: 未找到语音识别API密钥，请检查环境变量sttkey")
+        print_error("错误: 未找到语音识别API密钥，请检查环境变量sttkey")
         return ""
         
     headers = {
@@ -37,17 +38,18 @@ def recognize_speech() -> str:
     r = sr.Recognizer()
     try:
         with sr.Microphone() as source:
-            print("请开始说话...")
+            print_info("请开始说话...")
             try:
-                # 调整噪声阈值
-                r.adjust_for_ambient_noise(source, duration=0.5)
-                audio = r.listen(source, timeout=5, phrase_time_limit=10)
-                print("录音结束，正在识别...")
+                # 调整噪声阈值以提高识别敏感度
+                r.adjust_for_ambient_noise(source, duration=0.3)
+                # 缩短超时以便在未检测到声音时快速重新监听
+                audio = r.listen(source, timeout=3, phrase_time_limit=10)
+                print_info("录音结束，正在识别...")
             except sr.WaitTimeoutError:
-                print("超时未检测到语音输入")
+                print_warning("超时未检测到语音输入，继续监听...")
                 return ""
     except Exception as e:
-        print(f"麦克风初始化错误: {str(e)}")
+        print_error(f"麦克风初始化错误: {str(e)}")
         return ""
 
     temp_file = f"temp_audio_{uuid.uuid4().hex}.wav"  # 使用唯一文件名
@@ -65,16 +67,16 @@ def recognize_speech() -> str:
             response.raise_for_status()
             result = response.json()
             if "text" not in result:
-                print(f"API返回格式错误，未找到'text'字段: {result}")
+                print_error(f"API返回格式错误，未找到'text'字段: {result}")
                 return ""
             text = result['text']
-            print(f"语音识别结果: {text}")
+            print_success(f"语音识别结果: {text}")
             return text
     except requests.exceptions.RequestException as e:
-        print(f"请求错误: {e}")
+        print_error(f"请求错误: {e}")
         return ""
     except (KeyError, TypeError, ValueError) as e:
-        print(f"响应格式错误: {e}")
+        print_error(f"响应格式错误: {e}")
         return ""
     finally:
         # 延迟删除，或者在下一次循环开始时删除
@@ -82,6 +84,6 @@ def recognize_speech() -> str:
             if os.path.exists(temp_file):
                 os.remove(temp_file)
         except OSError as e:
-            print(f"删除临时文件失败: {e}")
+            print_warning(f"删除临时文件失败: {e}")
 
     return "" 

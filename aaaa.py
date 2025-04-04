@@ -45,58 +45,19 @@ client = OpenAI(
 )
 
 
-# 定义更可靠的音频播放函数
+# 定义简单的音频播放函数
 def play_audio(file_path):
     """
-    使用多种方法尝试播放音频文件
+    直接播放音频文件
     :param file_path: 音频文件路径
     :return: 是否成功播放
     """
     try:
-        print_info(f"尝试播放音频: {file_path}")
-        
-        # 方法1: 直接使用playsound
-        try:
-            playsound(file_path)
-            return True
-        except Exception as e:
-            print_warning(f"playsound失败: {str(e)}")
-        
-        # 方法2: 使用系统命令播放
-        try:
-            if os.name == 'nt':  # Windows
-                os.system(f'start {file_path}')
-            elif os.name == 'posix':  # macOS 或 Linux
-                if os.system('which afplay >/dev/null 2>&1') == 0:  # macOS
-                    os.system(f'afplay {file_path}')
-                elif os.system('which aplay >/dev/null 2>&1') == 0:  # Linux with ALSA
-                    os.system(f'aplay {file_path}')
-                else:
-                    os.system(f'xdg-open {file_path}')  # 通用Linux方法
-            print_success("使用系统命令播放成功")
-            return True
-        except Exception as e:
-            print_warning(f"系统命令播放失败: {str(e)}")
-        
-        # 方法3: 使用PowerShell命令播放
-        try:
-            if os.name == 'nt':  # Windows
-                powershell_cmd = f'''
-                $player = New-Object System.Media.SoundPlayer
-                $player.SoundLocation = "{os.path.abspath(file_path)}"
-                $player.Play()
-                Start-Sleep -s 3
-                '''
-                subprocess.run(["powershell", "-Command", powershell_cmd], shell=True)
-                print_success("使用PowerShell播放成功")
-                return True
-        except Exception as e:
-            print_warning(f"PowerShell播放失败: {str(e)}")
-        
-        print_error("所有音频播放方法都失败了")
-        return False
+        print_info(f"播放音频: {file_path}")
+        playsound(file_path, block=True)  # 阻塞式播放，确保完成播放
+        return True
     except Exception as e:
-        print_error(f"播放音频时出错: {str(e)}")
+        print_error(f"播放音频失败: {str(e)}")
         return False
 
 
@@ -1622,19 +1583,9 @@ if __name__ == "__main__":
             print_info("请说话，我在听...")
             input_message = recognize_speech()
             
-            # 如果语音识别失败，尝试重新识别
-            retry_count = 0
-            while not input_message and retry_count < 3:
-                retry_count += 1
-                print_warning(f"未能识别语音，正在重试 ({retry_count}/3)...")
-                input_message = recognize_speech()
-            
+            # 如果语音识别失败，持续尝试重新识别，不限制次数
             if not input_message:
-                print_error("多次尝试后仍未能识别语音，请检查麦克风设置")
-                print_info("按回车键重试，或输入'exit'退出")
-                manual_input = input()
-                if manual_input.lower() == 'exit':
-                    break
+                print_warning("未能识别语音，继续监听...")
                 continue
             
             print_highlight(f"语音识别结果: {input_message}")

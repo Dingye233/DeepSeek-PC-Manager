@@ -10,6 +10,7 @@ import uuid
 import requests
 import os
 import tempfile
+import subprocess
 from playsound import playsound
 
 from dotenv import load_dotenv
@@ -114,18 +115,32 @@ def tts_play(text: str, voice_type: str = voice_type1):
         voice_type: 音色类型
     """
     try:
+        # 验证文本不为空
+        if not text or len(text.strip()) == 0:
+            print("警告: 文本为空，无法合成语音")
+            return False
+            
+        # 使用火山引擎合成音频
         audio_data = tts_volcano(text, voice_type)
+        
+        # 验证音频数据
+        if not audio_data or len(audio_data) == 0:
+            print("错误: 未能获取有效的音频数据")
+            return False
+            
+        # 保存到临时文件
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
             temp_file = tmp.name
             tmp.write(audio_data)
         
-        playsound(temp_file)
+        # 直接播放 - 保持简单
+        playsound(temp_file, block=True)
         
-        # 使用完后删除临时文件
+        # 播放完成后删除临时文件
         try:
             os.unlink(temp_file)
-        except:
-            pass
+        except Exception as e:
+            print(f"清理临时文件失败: {str(e)}")
         
         return True
     except Exception as e:

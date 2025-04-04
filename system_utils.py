@@ -54,7 +54,7 @@ async def get_user_input_async(prompt: str, timeout: int = 30):
 
 # PowerShell命令执行
 async def powershell_command(command: str) -> str:
-    """改进后的交互式命令执行函数，LLM直接以用户身份与控制台交互，支持动态超时"""
+    """改进后的交互式命令执行函数，LLM直接以用户身份与控制台交互，支持长时间运行任务的监控"""
     # 获取系统默认编码
     system_encoding = locale.getpreferredencoding()
 
@@ -89,11 +89,7 @@ async def powershell_command(command: str) -> str:
     buffer = ''
     context_buffer = []  # 存储上下文信息，用于LLM分析
     
-    # 动态超时机制
-    base_timeout = 240  # 基础超时时间
-    max_timeout = 600   # 最大超时时间
-    timeout = base_timeout
-    
+    # 移除超时机制，改为无限运行
     last_active = time.time()
     last_output_time = time.time()  # 记录最后一次有输出的时间
     
@@ -107,8 +103,13 @@ async def powershell_command(command: str) -> str:
         "last_chunk_time": time.time(),  # 最后一次收到输出的时间
         "inactivity_threshold": 10,  # 无活动阈值（秒）
         "command_completed": False,  # 命令是否已完成
-        "no_output_counter": 0      # 连续无输出计数
+        "no_output_counter": 0,      # 连续无输出计数
+        "stop_requested": False,     # 是否请求停止命令
+        "monitor_active": True       # 监控是否活跃
     }
+    
+    # 定义一个事件来通知控制台监控线程停止
+    monitor_stop_event = asyncio.Event()
 
     # 尝试多种编码的解码函数
     def try_decode(byte_data):
@@ -286,6 +287,48 @@ async def powershell_command(command: str) -> str:
         except Exception as e:
             print_warning("响应生成出错，使用默认回应")
             return "y", f"调用失败", 0.0, False, ""
+    
+    async def monitor_console_activity():
+        """
+        监控控制台活动的线程，每60秒检查一次输出是否变化
+        如果连续两次检查的最后三行文本相同，则认为控制台可能阻塞
+        """
+        last_three_lines = ""
+        
+        while command_activity["monitor_active"]:
+            try:
+                # 等待60秒
+                try:
+                    await asyncio.wait_for(monitor_stop_event.wait(), timeout=60)
+                    # 如果事件被设置，说明应该退出监控
+                    if monitor_stop_event.is_set():
+                        break
+                except asyncio.TimeoutError:
+                    # 超时，继续检查
+                    pass
+                
+                # 确保命令有输出且仍在运行中
+                if not command_activity["has_output"] or proc.returncode is not None:
+                    continue
+                
+                # 提取最后三行文本
+                buffer_lines = buffer.strip().split('\n')
+                current_three_lines = '\n'.join(buffer_lines[-3:] if len(buffer_lines) >= 3 else buffer_lines)
+                
+                # 如果与上次检查的文本相同，可能表示阻塞
+                if last_three_lines and current_three_lines == last_three_lines:
+                    print_warning("\n检测到控制台输出在过去60秒内没有变化，可能表示任务已阻塞")
+                    command_activity["stop_requested"] = True
+                    break
+                
+                # 更新上次检查的文本
+                last_three_lines = current_three_lines
+                
+            except Exception as e:
+                print_warning(f"监控线程出错: {str(e)}")
+                # 继续运行，不中断监控
+        
+        print_info("监控线程已结束")
 
     async def watch_output(stream, is_stderr=False):
         """异步读取输出流，限制控制台输出，实现智能命令完成检测"""
@@ -298,6 +341,11 @@ async def powershell_command(command: str) -> str:
         
         while True:
             try:
+                # 检查是否请求停止命令
+                if command_activity["stop_requested"]:
+                    print_warning("接收到停止请求，正在终止命令...")
+                    break
+                
                 # 非阻塞读取，设置超时
                 try:
                     chunk = await asyncio.wait_for(stream.read(100), timeout=1.0)
@@ -322,15 +370,7 @@ async def powershell_command(command: str) -> str:
                                     # 静默完成
                                     command_activity['command_completed'] = True
                                     return
-                                
-                            # 如果空闲周期过多，增加无输出计数器
-                            command_activity['no_output_counter'] += 1
                             
-                            # 如果长时间无输出且无交互，可能是卡死
-                            if command_activity['no_output_counter'] >= 10 and interaction_count == 0:
-                                print_warning("\n命令长时间无响应，可能已卡死")
-                                return
-                    
                     # 继续下一个循环
                     continue
                 
@@ -433,12 +473,15 @@ async def powershell_command(command: str) -> str:
     # 创建输出监控任务
     stdout_task = asyncio.create_task(watch_output(proc.stdout))
     stderr_task = asyncio.create_task(watch_output(proc.stderr, True))
+    
+    # 创建控制台活动监控任务
+    monitor_task = asyncio.create_task(monitor_console_activity())
 
     try:
-        # 自适应超时检测循环
+        # 无超时的检测循环
         while True:
             # 检查命令是否已完成
-            if command_activity['command_completed']:
+            if command_activity['command_completed'] or command_activity['stop_requested']:
                 # 给一点额外时间收集最后的输出
                 await asyncio.sleep(1.0)
                 break
@@ -447,17 +490,7 @@ async def powershell_command(command: str) -> str:
             if proc.returncode is not None:
                 break
                 
-            # 计算已运行时间
-            elapsed_time = time.time() - last_active
-            
-            # 根据交互次数和输出情况动态调整超时
-            if interaction_count > 0:
-                # 有交互的命令，增加超时时间
-                adjusted_timeout = min(base_timeout + (interaction_count * 60), max_timeout)
-            else:
-                adjusted_timeout = base_timeout
-                
-            # 如果长时间无输出，可能是卡死或需要额外处理
+            # 检查命令状态但不设置超时
             if command_activity['has_output'] and (time.time() - last_output_time > 30):
                 # 如果超过30秒无输出，询问LLM命令状态
                 if len(buffer) > 20:  # 确保有足够内容进行分析
@@ -467,25 +500,26 @@ async def powershell_command(command: str) -> str:
                         # 静默完成
                         await asyncio.sleep(2.0)
                         break
-                        
-            # 检查是否超时
-            if elapsed_time > adjusted_timeout:
-                print_warning(f"\n命令执行时间已超过 {adjusted_timeout} 秒")
-                raise asyncio.TimeoutError()
 
             await asyncio.sleep(0.5)  # 减少检查频率，降低CPU使用
 
-    except asyncio.TimeoutError:
-        print_warning("\n命令执行超时，正在终止")
-        proc.terminate()
-        return f"错误：命令执行超时（超过{timeout}秒）"
-
     finally:
+        # 设置事件，通知监控线程停止
+        monitor_stop_event.set()
+        command_activity["monitor_active"] = False
+        
+        # 停止命令执行（如果需要）
+        if command_activity["stop_requested"] and proc.returncode is None:
+            print_warning("正在终止可能已阻塞的命令...")
+            proc.terminate()
+        
         # 取消输出监控任务
         if not stdout_task.done():
             stdout_task.cancel()
         if not stderr_task.done():
             stderr_task.cancel()
+        if not monitor_task.done():
+            monitor_task.cancel()
         
         try:
             await stdout_task
@@ -493,6 +527,10 @@ async def powershell_command(command: str) -> str:
             pass
         try:
             await stderr_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await monitor_task
         except asyncio.CancelledError:
             pass
 
@@ -517,11 +555,16 @@ async def powershell_command(command: str) -> str:
     garbled_warning = ""
     if contains_garbled(stdout):
         garbled_warning = "注意：输出中可能包含中文乱码，请在总结中说明这一点。"
+    
+    # 添加停止原因提示
+    stop_reason = ""
+    if command_activity["stop_requested"]:
+        stop_reason = "（因检测到60秒内控制台输出无变化而提前停止）"
         
     interaction_info = f"命令执行过程中有{interaction_count}次交互" if interaction_count > 0 else ""
 
-    # 只有在有实际输出且执行成功的情况下进行处理
-    if proc.returncode == 0 and stdout:
+    # 只有在有实际输出的情况下进行处理
+    if stdout:
         # 检查输出长度是否超过5000字符
         if len(stdout) > 5000:
             try:
@@ -531,6 +574,7 @@ async def powershell_command(command: str) -> str:
                 命令: {command}
                 {garbled_warning}
                 {interaction_info}
+                {stop_reason}
                 输出:
                 {stdout[:4000] if len(stdout) > 4000 else stdout}
 
@@ -547,24 +591,24 @@ async def powershell_command(command: str) -> str:
                 summary = response.choices[0].message.content
                 # 返回LLM摘要，不包含完整输出
                 return f"""
-## 命令执行成功 (输出较多，已生成摘要):
+## 命令执行 {stop_reason} (输出较多，已生成摘要):
 
 {summary}
 """
             except Exception as e:
                 # LLM调用失败时返回原始输出
-                return f"执行成功 (输出较长):\n{stdout[:1000]}...(输出过长，已截断)"
+                return f"执行结果 {stop_reason} (输出较长):\n{stdout[:1000]}...(输出过长，已截断)"
         else:
             # 输出少于5000字符，直接返回原始输出
-            return f"## 命令执行成功:\n{stdout}"
+            return f"## 命令执行结果 {stop_reason}:\n{stdout}"
     elif proc.returncode == 0:
-        return f"命令执行成功（无输出）"
+        return f"命令执行成功（无输出）{stop_reason}"
     else:
         error_msg = stderr or "未知错误"
         # 对错误信息也进行长度限制
         if len(error_msg) > 1000:
             error_msg = error_msg[:1000] + "..."
-        return f"命令执行失败（错误码 {proc.returncode}）:\n{error_msg}"
+        return f"命令执行失败（错误码 {proc.returncode}）{stop_reason}:\n{error_msg}"
 
 # 列出目录内容
 async def list_directory(path="."):
@@ -585,7 +629,7 @@ async def list_directory(path="."):
 
 # CMD命令执行
 async def cmd_command(command: str) -> str:
-    """CMD控制台的交互式命令执行函数，LLM直接以用户身份与控制台交互，支持动态超时"""
+    """CMD控制台的交互式命令执行函数，LLM直接以用户身份与控制台交互，支持长时间运行任务的监控"""
     # 获取系统默认编码
     system_encoding = locale.getpreferredencoding()
 
@@ -621,11 +665,7 @@ async def cmd_command(command: str) -> str:
     buffer = ''
     context_buffer = []  # 存储上下文信息，用于LLM分析
     
-    # 动态超时机制
-    base_timeout = 240  # 基础超时时间
-    max_timeout = 600   # 最大超时时间
-    timeout = base_timeout
-    
+    # 移除超时机制，改为无限运行
     last_active = time.time()
     last_output_time = time.time()  # 记录最后一次有输出的时间
     
@@ -639,8 +679,13 @@ async def cmd_command(command: str) -> str:
         "last_chunk_time": time.time(),  # 最后一次收到输出的时间
         "inactivity_threshold": 10,  # 无活动阈值（秒）
         "command_completed": False,  # 命令是否已完成
-        "no_output_counter": 0      # 连续无输出计数
+        "no_output_counter": 0,      # 连续无输出计数
+        "stop_requested": False,     # 是否请求停止命令
+        "monitor_active": True       # 监控是否活跃
     }
+    
+    # 定义一个事件来通知控制台监控线程停止
+    monitor_stop_event = asyncio.Event()
 
     # 尝试多种编码的解码函数
     def try_decode(byte_data):
@@ -818,6 +863,48 @@ async def cmd_command(command: str) -> str:
         except Exception as e:
             print_warning("响应生成出错，使用默认回应")
             return "y", f"调用失败", 0.0, False, ""
+    
+    async def monitor_console_activity():
+        """
+        监控控制台活动的线程，每60秒检查一次输出是否变化
+        如果连续两次检查的最后三行文本相同，则认为控制台可能阻塞
+        """
+        last_three_lines = ""
+        
+        while command_activity["monitor_active"]:
+            try:
+                # 等待60秒
+                try:
+                    await asyncio.wait_for(monitor_stop_event.wait(), timeout=60)
+                    # 如果事件被设置，说明应该退出监控
+                    if monitor_stop_event.is_set():
+                        break
+                except asyncio.TimeoutError:
+                    # 超时，继续检查
+                    pass
+                
+                # 确保命令有输出且仍在运行中
+                if not command_activity["has_output"] or proc.returncode is not None:
+                    continue
+                
+                # 提取最后三行文本
+                buffer_lines = buffer.strip().split('\n')
+                current_three_lines = '\n'.join(buffer_lines[-3:] if len(buffer_lines) >= 3 else buffer_lines)
+                
+                # 如果与上次检查的文本相同，可能表示阻塞
+                if last_three_lines and current_three_lines == last_three_lines:
+                    print_warning("\n检测到控制台输出在过去60秒内没有变化，可能表示任务已阻塞")
+                    command_activity["stop_requested"] = True
+                    break
+                
+                # 更新上次检查的文本
+                last_three_lines = current_three_lines
+                
+            except Exception as e:
+                print_warning(f"监控线程出错: {str(e)}")
+                # 继续运行，不中断监控
+        
+        print_info("监控线程已结束")
 
     async def watch_output(stream, is_stderr=False):
         """异步读取输出流，限制控制台输出，实现智能命令完成检测"""
@@ -830,6 +917,11 @@ async def cmd_command(command: str) -> str:
         
         while True:
             try:
+                # 检查是否请求停止命令
+                if command_activity["stop_requested"]:
+                    print_warning("接收到停止请求，正在终止命令...")
+                    break
+                
                 # 非阻塞读取，设置超时
                 try:
                     chunk = await asyncio.wait_for(stream.read(100), timeout=1.0)
@@ -854,15 +946,7 @@ async def cmd_command(command: str) -> str:
                                     # 静默完成
                                     command_activity['command_completed'] = True
                                     return
-                                
-                            # 如果空闲周期过多，增加无输出计数器
-                            command_activity['no_output_counter'] += 1
                             
-                            # 如果长时间无输出且无交互，可能是卡死
-                            if command_activity['no_output_counter'] >= 10 and interaction_count == 0:
-                                print_warning("\n命令长时间无响应，可能已卡死")
-                                return
-                    
                     # 继续下一个循环
                     continue
                 
@@ -965,12 +1049,15 @@ async def cmd_command(command: str) -> str:
     # 创建输出监控任务
     stdout_task = asyncio.create_task(watch_output(proc.stdout))
     stderr_task = asyncio.create_task(watch_output(proc.stderr, True))
+    
+    # 创建控制台活动监控任务
+    monitor_task = asyncio.create_task(monitor_console_activity())
 
     try:
-        # 自适应超时检测循环
+        # 无超时的检测循环
         while True:
             # 检查命令是否已完成
-            if command_activity['command_completed']:
+            if command_activity['command_completed'] or command_activity['stop_requested']:
                 # 给一点额外时间收集最后的输出
                 await asyncio.sleep(1.0)
                 break
@@ -979,17 +1066,7 @@ async def cmd_command(command: str) -> str:
             if proc.returncode is not None:
                 break
                 
-            # 计算已运行时间
-            elapsed_time = time.time() - last_active
-            
-            # 根据交互次数和输出情况动态调整超时
-            if interaction_count > 0:
-                # 有交互的命令，增加超时时间
-                adjusted_timeout = min(base_timeout + (interaction_count * 60), max_timeout)
-            else:
-                adjusted_timeout = base_timeout
-                
-            # 如果长时间无输出，可能是卡死或需要额外处理
+            # 检查命令状态但不设置超时
             if command_activity['has_output'] and (time.time() - last_output_time > 30):
                 # 如果超过30秒无输出，询问LLM命令状态
                 if len(buffer) > 20:  # 确保有足够内容进行分析
@@ -999,25 +1076,26 @@ async def cmd_command(command: str) -> str:
                         # 静默完成
                         await asyncio.sleep(2.0)
                         break
-                        
-            # 检查是否超时
-            if elapsed_time > adjusted_timeout:
-                print_warning(f"\n命令执行时间已超过 {adjusted_timeout} 秒")
-                raise asyncio.TimeoutError()
 
             await asyncio.sleep(0.5)  # 减少检查频率，降低CPU使用
 
-    except asyncio.TimeoutError:
-        print_warning("\n命令执行超时，正在终止")
-        proc.terminate()
-        return f"错误：命令执行超时（超过{timeout}秒）"
-
     finally:
+        # 设置事件，通知监控线程停止
+        monitor_stop_event.set()
+        command_activity["monitor_active"] = False
+        
+        # 停止命令执行（如果需要）
+        if command_activity["stop_requested"] and proc.returncode is None:
+            print_warning("正在终止可能已阻塞的命令...")
+            proc.terminate()
+        
         # 取消输出监控任务
         if not stdout_task.done():
             stdout_task.cancel()
         if not stderr_task.done():
             stderr_task.cancel()
+        if not monitor_task.done():
+            monitor_task.cancel()
         
         try:
             await stdout_task
@@ -1025,6 +1103,10 @@ async def cmd_command(command: str) -> str:
             pass
         try:
             await stderr_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await monitor_task
         except asyncio.CancelledError:
             pass
 
@@ -1049,11 +1131,16 @@ async def cmd_command(command: str) -> str:
     garbled_warning = ""
     if contains_garbled(stdout):
         garbled_warning = "注意：输出中可能包含中文乱码，请在总结中说明这一点。"
+    
+    # 添加停止原因提示
+    stop_reason = ""
+    if command_activity["stop_requested"]:
+        stop_reason = "（因检测到60秒内控制台输出无变化而提前停止）"
         
     interaction_info = f"命令执行过程中有{interaction_count}次交互" if interaction_count > 0 else ""
 
-    # 只有在有实际输出且执行成功的情况下进行处理
-    if proc.returncode == 0 and stdout:
+    # 只有在有实际输出的情况下进行处理
+    if stdout:
         # 检查输出长度是否超过5000字符
         if len(stdout) > 5000:
             try:
@@ -1063,6 +1150,7 @@ async def cmd_command(command: str) -> str:
                 命令: {command}
                 {garbled_warning}
                 {interaction_info}
+                {stop_reason}
                 输出:
                 {stdout[:4000] if len(stdout) > 4000 else stdout}
 
@@ -1079,21 +1167,21 @@ async def cmd_command(command: str) -> str:
                 summary = response.choices[0].message.content
                 # 返回LLM摘要，不包含完整输出
                 return f"""
-## 命令执行成功 (输出较多，已生成摘要):
+## 命令执行 {stop_reason} (输出较多，已生成摘要):
 
 {summary}
 """
             except Exception as e:
                 # LLM调用失败时返回原始输出
-                return f"执行成功 (输出较长):\n{stdout[:1000]}...(输出过长，已截断)"
+                return f"执行结果 {stop_reason} (输出较长):\n{stdout[:1000]}...(输出过长，已截断)"
         else:
             # 输出少于5000字符，直接返回原始输出
-            return f"## 命令执行成功:\n{stdout}"
+            return f"## 命令执行结果 {stop_reason}:\n{stdout}"
     elif proc.returncode == 0:
-        return f"命令执行成功（无输出）"
+        return f"命令执行成功（无输出）{stop_reason}"
     else:
         error_msg = stderr or "未知错误"
         # 对错误信息也进行长度限制
         if len(error_msg) > 1000:
             error_msg = error_msg[:1000] + "..."
-        return f"命令执行失败（错误码 {proc.returncode}）:\n{error_msg}" 
+        return f"命令执行失败（错误码 {proc.returncode}）{stop_reason}:\n{error_msg}" 
