@@ -291,9 +291,9 @@ async def powershell_command(command: str) -> str:
     async def monitor_console_activity():
         """
         监控控制台活动的线程，每60秒检查一次输出是否变化
-        如果连续两次检查的最后三行文本相同，则认为控制台可能阻塞
+        如果60秒内整个控制台输出完全没有变化，则认为控制台可能阻塞
         """
-        last_three_lines = ""
+        last_buffer_content = ""
         
         while command_activity["monitor_active"]:
             try:
@@ -311,18 +311,17 @@ async def powershell_command(command: str) -> str:
                 if not command_activity["has_output"] or proc.returncode is not None:
                     continue
                 
-                # 提取最后三行文本
-                buffer_lines = buffer.strip().split('\n')
-                current_three_lines = '\n'.join(buffer_lines[-3:] if len(buffer_lines) >= 3 else buffer_lines)
+                # 获取当前整个缓冲区内容
+                current_buffer_content = buffer.strip()
                 
-                # 如果与上次检查的文本相同，可能表示阻塞
-                if last_three_lines and current_three_lines == last_three_lines:
-                    print_warning("\n检测到控制台输出在过去60秒内没有变化，可能表示任务已阻塞")
+                # 如果缓冲区内容非空且与上次检查的内容完全相同，可能表示阻塞
+                if last_buffer_content and current_buffer_content == last_buffer_content:
+                    print_warning("\n检测到控制台输出在过去60秒内没有任何变化，可能表示任务已阻塞")
                     command_activity["stop_requested"] = True
                     break
                 
-                # 更新上次检查的文本
-                last_three_lines = current_three_lines
+                # 更新上次检查的缓冲区内容
+                last_buffer_content = current_buffer_content
                 
             except Exception as e:
                 print_warning(f"监控线程出错: {str(e)}")
@@ -610,23 +609,6 @@ async def powershell_command(command: str) -> str:
             error_msg = error_msg[:1000] + "..."
         return f"命令执行失败（错误码 {proc.returncode}）{stop_reason}:\n{error_msg}"
 
-# 列出目录内容
-async def list_directory(path="."):
-    """特殊处理列出目录内容的函数，确保中文文件名正确显示"""
-    # 使用专门的命令和编码设置来确保中文文件名正确显示
-    command = f'''
-    $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
-    Get-ChildItem -Path "{path}" | ForEach-Object {{
-        [PSCustomObject]@{{
-            Name = $_.Name
-            Type = if($_.PSIsContainer) {{ "Directory" }} else {{ "File" }}
-            Size = if(!$_.PSIsContainer) {{ $_.Length }} else {{ "N/A" }}
-            LastModified = $_.LastWriteTime
-        }}
-    }} | ConvertTo-Json -Depth 1
-    '''
-    return await powershell_command(command)
-
 # CMD命令执行
 async def cmd_command(command: str) -> str:
     """CMD控制台的交互式命令执行函数，LLM直接以用户身份与控制台交互，支持长时间运行任务的监控"""
@@ -867,9 +849,9 @@ async def cmd_command(command: str) -> str:
     async def monitor_console_activity():
         """
         监控控制台活动的线程，每60秒检查一次输出是否变化
-        如果连续两次检查的最后三行文本相同，则认为控制台可能阻塞
+        如果60秒内整个控制台输出完全没有变化，则认为控制台可能阻塞
         """
-        last_three_lines = ""
+        last_buffer_content = ""
         
         while command_activity["monitor_active"]:
             try:
@@ -887,18 +869,17 @@ async def cmd_command(command: str) -> str:
                 if not command_activity["has_output"] or proc.returncode is not None:
                     continue
                 
-                # 提取最后三行文本
-                buffer_lines = buffer.strip().split('\n')
-                current_three_lines = '\n'.join(buffer_lines[-3:] if len(buffer_lines) >= 3 else buffer_lines)
+                # 获取当前整个缓冲区内容
+                current_buffer_content = buffer.strip()
                 
-                # 如果与上次检查的文本相同，可能表示阻塞
-                if last_three_lines and current_three_lines == last_three_lines:
-                    print_warning("\n检测到控制台输出在过去60秒内没有变化，可能表示任务已阻塞")
+                # 如果缓冲区内容非空且与上次检查的内容完全相同，可能表示阻塞
+                if last_buffer_content and current_buffer_content == last_buffer_content:
+                    print_warning("\n检测到控制台输出在过去60秒内没有任何变化，可能表示任务已阻塞")
                     command_activity["stop_requested"] = True
                     break
                 
-                # 更新上次检查的文本
-                last_three_lines = current_three_lines
+                # 更新上次检查的缓冲区内容
+                last_buffer_content = current_buffer_content
                 
             except Exception as e:
                 print_warning(f"监控线程出错: {str(e)}")

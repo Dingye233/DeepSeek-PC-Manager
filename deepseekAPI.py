@@ -19,7 +19,7 @@ from file_utils import user_information_read
 from error_utils import parse_error_message, task_error_analysis
 from message_utils import num_tokens_from_messages, clean_message_history, clear_context
 from console_utils import print_color, print_success, print_error, print_warning, print_info, print_highlight
-from system_utils import powershell_command, list_directory, cmd_command
+from system_utils import powershell_command, cmd_command
 
 load_dotenv()
 
@@ -37,7 +37,6 @@ async def ask_user_to_continue(conversation_messages, is_task_complete=None):
     """询问用户是否继续尝试任务，即使智能体认为无法完成"""
     try:
         user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？\n(输入您的想法或指示，不限于简单的继续/终止选择): ", 120)
-        
         # 如果用户输入超时返回None
         if user_choice is None:
             print_warning("用户输入超时，默认继续尝试任务")
@@ -324,10 +323,6 @@ async def execute_task_with_planning(user_input, messages_history):
                                     result = f"用户输入: {user_input}" if user_input else "用户未提供输入（超时）"
                                 elif func_name == "read_file":
                                     result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
-                                elif func_name == "list_files":
-                                    result = file_reader.list_files(args["directory_path"], args["include_pattern"], args["recursive"])
-                                elif func_name == "list_directory":
-                                    result = await list_directory(args.get("path", "."))
                                 else:
                                     raise ValueError(f"未定义的工具调用: {func_name}")
                                 
@@ -962,7 +957,8 @@ async def execute_simple_task(user_input, messages_history):
     
     # 任务执行循环
     max_iterations = 20  # 最大迭代次数
-    for iteration in range(1, max_iterations + 1):
+    iteration = 1  # 将iteration从循环中提取出来以便重置
+    while iteration <= max_iterations:
         print_info(f"\n===== 任务执行进度 {iteration}/{max_iterations} =====")
         
         # 如果token数量过大，清理历史消息
@@ -1065,10 +1061,6 @@ async def execute_simple_task(user_input, messages_history):
                             result = f"用户输入: {user_input_data}" if user_input_data else "用户未提供输入（超时）"
                         elif func_name == "read_file":
                             result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
-                        elif func_name == "list_files":
-                            result = file_reader.list_files(args["directory_path"], args["include_pattern"], args["recursive"])
-                        elif func_name == "list_directory":
-                            result = await list_directory(args.get("path", "."))
                         else:
                             raise ValueError(f"未定义的工具调用: {func_name}")
                         
@@ -1179,7 +1171,10 @@ async def execute_simple_task(user_input, messages_history):
                                     "role": "user", 
                                     "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
                                 })
-                                
+                            
+                            # 重置迭代计数，相当于给予全新的尝试机会
+                            iteration = 1
+                            print_info("\n⚠️ 用户选择继续尝试，迭代计数已重置！")
                             continue  # 继续执行任务
                         else:
                             # 用户确认终止
@@ -1204,6 +1199,9 @@ async def execute_simple_task(user_input, messages_history):
                             "content": "尽管任务看起来很困难，但我们需要继续尝试。请采用全新思路寻找解决方案。"
                         })
                         
+                        # 重置迭代计数，相当于给予全新的尝试机会
+                        iteration = 1
+                        print_info("\n⚠️ 默认继续尝试，迭代计数已重置！")
                         continue
                 
                 # 如果任务需要继续执行，添加执行提示
@@ -1247,6 +1245,9 @@ async def execute_simple_task(user_input, messages_history):
                 "role": "user", 
                 "content": f"执行过程中发生错误: {error_msg}。请调整策略，尝试其他方法继续执行任务。"
             })
+            
+        # 增加迭代计数
+        iteration += 1
     
     # 如果达到最大迭代次数仍未完成任务
     print_warning(f"\n⚠️ 已达到最大迭代次数({max_iterations})，但任务仍未完成")

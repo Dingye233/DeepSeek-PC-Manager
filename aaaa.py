@@ -35,7 +35,6 @@ from input_utils import get_user_input_async
 from file_utils import user_information_read
 from error_utils import parse_error_message, task_error_analysis
 from message_utils import num_tokens_from_messages, clean_message_history, clear_context
-from system_utils import powershell_command, list_directory
 
 
 # Create custom OpenAI client instance with DeepSeek API URL
@@ -474,10 +473,6 @@ async def execute_task_with_planning(user_input, messages_history):
                                     result = f"用户输入: {user_input}" if user_input else "用户未提供输入（超时）"
                                 elif func_name == "read_file":
                                     result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
-                                elif func_name == "list_files":
-                                    result = file_reader.list_files(args["directory_path"], args["include_pattern"], args["recursive"])
-                                elif func_name == "list_directory":
-                                    result = await list_directory(args.get("path", "."))
                                 else:
                                     raise ValueError(f"未定义的工具调用: {func_name}")
                                 
@@ -1320,10 +1315,6 @@ async def execute_simple_task(user_input, messages_history):
                             result = f"用户输入: {user_input_data}" if user_input_data else "用户未提供输入（超时）"
                         elif func_name == "read_file":
                             result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
-                        elif func_name == "list_files":
-                            result = file_reader.list_files(args["directory_path"], args["include_pattern"], args["recursive"])
-                        elif func_name == "list_directory":
-                            result = await list_directory(args.get("path", "."))
                         else:
                             raise ValueError(f"未定义的工具调用: {func_name}")
                         

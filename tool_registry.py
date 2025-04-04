@@ -80,7 +80,7 @@ def get_tools():
             "type": "function",
             "function": {
                 "name": "powershell_command",
-                "description": "【系统操作工具】通过PowerShell终端来控制系统操作（进程控制/系统设置/文件操作等），具有智能交互能力，可自动分析并响应命令执行过程中的确认请求。注意：对于代码和文件操作，请优先使用专用工具（write_code/read_code/append_code/read_file/list_files等）而非此工具。推荐一次执行一条命令，避免使用分号连接多条命令。",
+                "description": "【系统操作工具】通过PowerShell终端来控制系统操作（进程控制/系统设置/文件操作等），具有智能交互能力，可自动分析并响应命令执行过程中的确认请求。注意：对于代码和文件操作，请优先使用专用工具（write_code/read_code/append_code/read_file等）而非此工具。推荐一次执行一条命令，避免使用分号连接多条命令。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -107,22 +107,6 @@ def get_tools():
                         }
                     },
                     "required": ["command"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_directory",
-                "description": "【推荐用于目录浏览】列出指定目录内的文件和子目录，比PowerShell的dir/ls命令更安全可靠，是浏览目录内容的首选工具。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "要列出内容的目录路径，默认为当前目录(.)"
-                        }
-                    }
                 }
             }
         },
@@ -345,31 +329,6 @@ def get_tools():
                         }
                     },
                     "required": ["file_path"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_files",
-                "description": "【推荐用于文件列表】列出指定目录下的所有文件，支持模式匹配和递归搜索，比PowerShell的Get-ChildItem功能更专注，是浏览文件系统的首选工具。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "directory_path": {
-                            "type": "string",
-                            "description": "要列出文件的目录路径"
-                        },
-                        "include_pattern": {
-                            "type": "string",
-                            "description": "文件匹配模式，例如 *.txt 或 *.py"
-                        },
-                        "recursive": {
-                            "type": "boolean",
-                            "description": "是否递归搜索子目录，默认为false"
-                        }
-                    },
-                    "required": ["directory_path"]
                 }
             }
         }
