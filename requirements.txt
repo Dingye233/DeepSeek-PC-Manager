@@ -1,10 +1,8 @@
 openai
-python-dotenv
-edge-tts
-playsound
 requests
-speechrecognition
-keyboard
+asyncio
 pyaudio
-wave
-tiktoken
+pydub
+python-dotenv
+PyInstaller
+paramiko

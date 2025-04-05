@@ -14,12 +14,15 @@ import file_reader
 import tool_registry
 from weather_utils import get_weather
 from time_utils import get_current_time
-from input_utils import get_user_input_async
+from input_utils import get_user_input_async, cancel_active_input  # 导入cancel_active_input函数
 from file_utils import user_information_read
 from error_utils import parse_error_message, task_error_analysis
-from message_utils import num_tokens_from_messages, clean_message_history, clear_context
+from message_utils import num_tokens_from_messages, clean_message_history, clear_context, clean_message_history_with_llm
 from console_utils import print_color, print_success, print_error, print_warning, print_info, print_highlight
 from system_utils import powershell_command, cmd_command
+import concurrent.futures
+import sys  # 添加sys模块导入
+import time  # 添加time模块导入
 
 load_dotenv()
 
@@ -30,56 +33,75 @@ client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepsee
 
 
 messages = [{"role": "system","content": " 你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: "+user_information_read()}, 
-{"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 3.对于涉及数据增删查改、批量处理、文件处理等复杂任务，优先考虑使用Python脚本而非直接Shell命令，这样更安全高效且易于维护 4.创建脚本时确保使用合适的异常处理和备份机制 5.对于重复性操作或影响多个文件的操作，应该编写Python脚本而非手动执行命令 6.所有任务中创建的文件和脚本都应放在workspace文件夹下，如果该文件夹不存在则应先创建它"}]
+{"role": "system","content": " 注意：1.文件操作必须使用绝对路径 2.危险操作要自动添加安全参数 3.对于涉及数据增删查改、批量处理、文件处理等复杂任务，必须优先使用Python脚本而非Shell命令，这样更安全高效且易于维护 4.创建脚本时确保使用合适的异常处理和备份机制 5.对于重复性操作或影响多个文件的操作，必须编写Python脚本而非手动执行命令 6.所有任务中创建的文件和脚本都应放在workspace文件夹下，如果该文件夹不存在则应先创建它 7.当处理数据量大或文件数量多时，绝对不要使用PowerShell或CMD命令，而应编写Python脚本 8.只有在执行简单的单一操作（如检查文件是否存在）时才考虑使用PowerShell或CMD"}]
 
 # 将ask_user_to_continue函数从嵌套函数移到全局作用域
 async def ask_user_to_continue(conversation_messages, is_task_complete=None):
     """询问用户是否继续尝试任务，即使智能体认为无法完成"""
     try:
+        # 确保取消任何可能存在的输入任务
+        cancel_active_input()
+        time.sleep(0.1)  # 短暂等待确保取消完成
+        
         print_highlight("\n===== 等待用户决策 =====")
         print_highlight("请输入您的想法或指示，按回车键提交")
         print_highlight("===========================")
         
-        user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？\n(输入您的想法或指示，不限于简单的继续/终止选择): ", 120)
-        
-        # 如果用户输入超时返回None
-        if user_choice is None:
-            print_warning("用户输入超时，默认继续尝试任务")
+        # 使用简单直接的输入模式
+        try:
+            user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？", 60)
+            
+            # 如果用户输入超时，默认继续执行
+            if user_choice is None:
+                print_warning("用户输入超时，默认继续尝试任务")
+                # 默认继续尝试而非终止
+                conversation_messages.append({
+                    "role": "user", 
+                    "content": "用户输入超时，系统默认继续尝试。请采用全新思路寻找解决方案。"
+                })
+                
+                return "继续尝试"  # 返回默认值表示继续尝试
+            
+            # 正常处理用户输入
+            if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
+                # 用户选择继续尝试或提供了其他建议
+                print_info(f"\n用户输入: {user_choice}")
+                print_success("已接收用户输入，继续执行任务")
+                
+                # 重置任务失败标记（如果提供了is_task_complete参数）
+                if is_task_complete is not None:
+                    is_task_complete = False
+                
+                # 添加用户反馈到对话
+                conversation_messages.append({
+                    "role": "user", 
+                    "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
+                })
+                
+                return user_choice  # 直接返回用户输入
+            else:
+                # 用户确认终止
+                print_warning("\n用户选择终止任务。")
+                return user_choice  # 直接返回用户输入
+                
+        except asyncio.CancelledError:
+            # 处理取消异常，默认继续执行
+            print_warning("输入被取消，默认继续尝试任务")
             # 默认继续尝试而非终止
             conversation_messages.append({
                 "role": "user", 
-                "content": "用户输入超时，系统默认继续尝试。请采用全新思路寻找解决方案。"
+                "content": "系统检测到输入被取消，默认继续尝试。请采用全新思路寻找解决方案。"
             })
             
             return "继续尝试"  # 返回默认值表示继续尝试
-        
-        if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
-            # 用户选择继续尝试或提供了其他建议
-            print_info(f"\n用户输入: {user_choice}")
-            print_success("已接收用户输入，继续执行任务")
             
-            # 重置任务失败标记（如果提供了is_task_complete参数）
-            if is_task_complete is not None:
-                is_task_complete = False
-            
-            # 添加用户反馈到对话
-            conversation_messages.append({
-                "role": "user", 
-                "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
-            })
-            
-            return user_choice  # 直接返回用户输入
-        else:
-            # 用户确认终止
-            print_warning("\n用户选择终止任务。")
-            return user_choice  # 直接返回用户输入
     except Exception as e:
-        # 获取用户输入失败时的处理
-        print_error(f"获取用户输入失败: {str(e)}，默认继续尝试")
+        # 获取用户输入失败时的处理，默认继续执行
+        print_warning(f"获取用户输入失败: {str(e)}，默认继续尝试")
         # 默认继续尝试而非终止
         conversation_messages.append({
             "role": "user", 
-            "content": "尽管任务看起来很困难，但我们需要继续尝试。请采用全新思路寻找解决方案。"
+            "content": "系统默认继续尝试。请采用全新思路寻找解决方案。"
         })
         
         return "继续尝试"  # 返回默认值表示继续尝试
@@ -93,9 +115,17 @@ task_planning_system_message = {
 3. 不要提供具体命令、代码、参数等执行细节
 4. 不要使用具体的文件路径或文件名
 5. 不要猜测用户环境和系统配置
-6. 对于涉及数据增删查改、批量文件处理、重复性操作等任务，在规划中应该倾向于使用Python脚本而非直接执行shell命令
-7. 在任务涉及多个文件操作时，应该考虑使用Python脚本的可靠性和安全性优势
-8. 所有任务创建的文件和脚本都应放在workspace文件夹中，如果不存在应先创建
+6. 对于数据增删查改、批量文件处理、重复性操作等任务，必须在规划中使用Python脚本而非执行shell命令
+7. 严格限制PowerShell和CMD命令的使用，仅用于非常简单的单一操作
+8. 遇到以下情况时必须使用Python脚本而非命令行工具：
+   - 处理超过5个文件
+   - 数据量超过1MB
+   - 需要执行复杂的数据分析或转换
+   - 需要处理多种文件格式
+   - 需要对文件内容进行复杂解析
+   - 需要对数据执行批量操作
+9. 在任务涉及多个文件操作时，必须考虑Python脚本的可靠性和安全性优势
+10. 所有任务创建的文件和脚本都应放在workspace文件夹中，如果不存在应先创建
 
 执行方式：
 - 任务拆解应限制在3-5个高级步骤
@@ -103,7 +133,7 @@ task_planning_system_message = {
 - 不要提供具体工具选择的建议
 - 不要假设任何环境配置
 - 提供简短的目标描述，而非执行说明
-- 对于文件操作、数据处理等任务，考虑使用Python脚本的可行性，尤其是涉及到多个文件或需要重复执行的任务
+- 对于文件操作、数据处理等任务，明确规划使用Python脚本，尤其是涉及到多个文件或需要重复执行的任务
 - 规划时考虑使用workspace文件夹存放生成的文件，确保结构清晰
 
 任务分析完成后，agent会自行确定具体执行步骤、选择适当工具，并执行必要操作。你的任务只是提供高层次指导，而非执行细节。
@@ -189,8 +219,18 @@ async def execute_task_with_planning(user_input, messages_history):
 基于上述高层次目标，请自行确定具体执行步骤并调用适当的工具。
 不要解释你将如何执行，直接调用工具执行必要操作。
 每次只执行一个具体步骤，等待结果后再决定下一步。
-对于数据增删查改、批量处理、文件操作等任务，请优先考虑编写和使用Python脚本而非直接执行shell命令，这样更安全和可靠。
-当需要处理多个文件、进行重复性操作或复杂数据处理时，应创建Python脚本而非执行一系列命令。
+
+对于数据增删查改、批量处理、文件操作等任务，必须编写和使用Python脚本而非直接执行shell命令，这样更安全和可靠。
+特别是在以下情况下，必须使用Python脚本而不是PowerShell或CMD命令：
+1. 处理多个文件（超过5个文件）
+2. 数据量较大（超过1MB）
+3. 需要进行复杂数据分析
+4. 需要处理多种文件格式
+5. 需要执行批量操作
+6. 需要对文件内容进行解析
+
+只有在执行非常简单的单一操作时才考虑使用PowerShell或CMD命令。
+当需要处理多个文件、进行重复性操作或复杂数据处理时，必须创建Python脚本而非执行一系列命令。
 所有任务创建的文件和脚本都应放在workspace文件夹中，如果该文件夹不存在，请首先创建它。"""
 
                 if attempt > 0:
@@ -336,6 +376,11 @@ async def execute_task_with_planning(user_input, messages_history):
                                     result = f"用户输入: {user_input}" if user_input else "用户未提供输入（超时）"
                                 elif func_name == "read_file":
                                     result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
+                                elif func_name == "list_directory" or func_name == "list_dir":
+                                    # 处理已废弃的工具
+                                    error_message = f"工具 '{func_name}' 已被废弃，请使用 'powershell_command' 工具执行 'Get-ChildItem' 命令或 'cmd_command' 工具执行 'dir' 命令来列出目录内容。"
+                                    print_warning(error_message)
+                                    result = error_message
                                 else:
                                     raise ValueError(f"未定义的工具调用: {func_name}")
                                 
@@ -421,6 +466,9 @@ async def execute_task_with_planning(user_input, messages_history):
                                         messages_history.append({"role": "user", "content": user_input})
                                         messages_history.append({"role": "assistant", "content": summary})
                                         
+                                        # 主动清理线程池
+                                        cleanup_thread_pools()
+                                    
                                         return summary
                                 
                                 # 分析执行结果是否有错误
@@ -792,6 +840,10 @@ async def execute_task_with_planning(user_input, messages_history):
                     messages_history.append({"role": "user", "content": user_input})
                     messages_history.append({"role": "assistant", "content": summary})
                     
+                    # 主动清理线程池
+                    cleanup_thread_pools()
+                    
+          
                     return summary
                 else:
                     # 任务在内部递归中未完成，添加错误反馈
@@ -864,8 +916,9 @@ async def main(input_message: str):
     token_count = num_tokens_from_messages(messages)
     print_info(f"当前对话token数量: {token_count}")
     if token_count > 30000:
-        print_warning("Token数量超过预警阈值，清理消息历史...")
-        messages = clean_message_history(messages)
+        print_warning("Token数量超过预警阈值，让LLM决定消息清理策略...")
+        # 使用LLM智能清理消息
+        messages = await clean_message_history_with_llm(messages, client)
             
     # 先尝试常规对话，检查是否需要调用工具
     messages.append({"role": "user", "content": input_message})
@@ -949,7 +1002,8 @@ async def execute_simple_task(user_input, messages_history):
     # 检查token数量
     token_count = num_tokens_from_messages(planning_messages)
     if token_count > 30000:
-        planning_messages = clean_message_history(planning_messages)
+        # 使用LLM智能清理消息
+        planning_messages = await clean_message_history_with_llm(planning_messages, client)
     
     # 添加任务执行指导指南
     task_guidance = """
@@ -964,6 +1018,15 @@ async def execute_simple_task(user_input, messages_history):
     - 每次只执行一个操作，等待结果后再确定下一步
     - 每次执行后要分析工具的执行结果，判断是否成功
     - 任务只有在所有必要步骤都通过工具调用执行成功后才算完成
+    - 对于数据处理、文件操作和批量任务，必须使用Python脚本而非PowerShell或CMD命令
+    - 在以下情况下，必须编写Python脚本而非使用命令行工具：
+      * 处理多个文件（超过5个）
+      * 处理大量数据（超过1MB）
+      * 需要进行复杂数据分析
+      * 需要处理多种文件格式
+      * 需要执行批量操作
+      * 需要对文件内容进行解析
+    - 只有在执行非常简单的单一操作时才考虑使用PowerShell或CMD命令
     """
     
     planning_messages.append({"role": "user", "content": task_guidance})
@@ -974,11 +1037,11 @@ async def execute_simple_task(user_input, messages_history):
     while iteration <= max_iterations:
         print_info(f"\n===== 任务执行进度 {iteration}/{max_iterations} =====")
         
-        # 如果token数量过大，清理历史消息
+        # 如果token数量过大，使用LLM清理历史消息
         token_count = num_tokens_from_messages(planning_messages)
         if token_count > 30000:
-            print_warning("Token数量超过预警阈值，清理消息历史...")
-            planning_messages = clean_message_history(planning_messages)
+            print_warning("Token数量超过预警阈值，让LLM决定消息清理策略...")
+            planning_messages = await clean_message_history_with_llm(planning_messages, client)
         
         # 调用API，执行任务步骤
         try:
@@ -1078,6 +1141,11 @@ async def execute_simple_task(user_input, messages_history):
                             result = f"用户输入: {user_input_data}" if user_input_data else "用户未提供输入（超时）"
                         elif func_name == "read_file":
                             result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
+                        elif func_name == "list_directory" or func_name == "list_dir":
+                            # 处理已废弃的工具
+                            error_message = f"工具 '{func_name}' 已被废弃，请使用 'powershell_command' 工具执行 'Get-ChildItem' 命令或 'cmd_command' 工具执行 'dir' 命令来列出目录内容。"
+                            print_warning(error_message)
+                            result = error_message
                         else:
                             raise ValueError(f"未定义的工具调用: {func_name}")
                         
@@ -1144,14 +1212,14 @@ async def execute_simple_task(user_input, messages_history):
                     
                     # 如果摘要太短，生成更详细的摘要
                     if len(summary) < 10:
-                        summary_prompt = "任务已完成。请简洁总结执行结果（不超过50字）。"
+                        summary_prompt = "任务已完成。请简洁总结执行结果（不超过200字）。"
                         planning_messages.append({"role": "user", "content": summary_prompt})
                         
                         summary_response = client.chat.completions.create(
                             model="deepseek-chat",
                             messages=planning_messages,
                             temperature=0.2,
-                            max_tokens=50
+                            max_tokens=200
                         )
                         
                         summary = summary_response.choices[0].message.content
@@ -1162,13 +1230,47 @@ async def execute_simple_task(user_input, messages_history):
                     messages_history.append({"role": "user", "content": user_input})
                     messages_history.append({"role": "assistant", "content": summary})
                     
+                    # 主动清理线程池
+                    cleanup_thread_pools()
+                    
                     return summary
                 
                 elif "[任务失败]" in assessment_result:
                     # 询问用户是否继续尝试
                     try:
-                        user_choice = await ask_user_to_continue(planning_messages)
+                        # 询问用户是否希望继续尝试
+                        # 添加保护，防止用户输入被重复取消
+                        try:
+                            # 确保先取消任何已有的输入任务
+                            cancel_active_input()
+                            time.sleep(0.5)  # 短暂等待以确保任何先前的取消操作完成
+                            
+                            # 询问用户是否希望继续尝试
+                            user_choice = await ask_user_to_continue(planning_messages, is_task_complete)
+                            
+                        except asyncio.CancelledError:
+                            # 如果输入被取消，默认继续尝试
+                            print_warning("用户输入被取消，默认继续尝试")
+                            user_choice = "继续尝试"
+                            
+                            # 添加系统默认决策到对话
+                            planning_messages.append({
+                                "role": "user", 
+                                "content": "用户输入被取消，系统默认继续尝试。请采用全新思路寻找解决方案。"
+                            })
+                            
+                        except Exception as e:
+                            # 如果获取用户输入失败，也默认继续
+                            print_warning(f"获取用户输入异常: {str(e)}，默认继续尝试")
+                            user_choice = "继续尝试"
+                            
+                            # 添加系统默认决策到对话
+                            planning_messages.append({
+                                "role": "user", 
+                                "content": f"获取用户输入失败: {str(e)}，系统默认继续尝试。请采用全新思路寻找解决方案。"
+                            })
                         
+                        # 检查用户选择
                         if user_choice is None or (user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]):
                             # 用户选择继续尝试、输入超时或提供了其他建议
                             if user_choice is None:
@@ -1179,6 +1281,10 @@ async def execute_simple_task(user_input, messages_history):
                                     "role": "user", 
                                     "content": "用户输入超时，系统默认继续尝试。请采用全新思路寻找解决方案。"
                                 })
+                                
+                            elif user_choice == "继续尝试":
+                                # 已通过异常处理添加了消息，不需要额外处理
+                                pass
                                 
                             else:
                                 print_info(f"\n用户输入: {user_choice}")
@@ -1205,15 +1311,19 @@ async def execute_simple_task(user_input, messages_history):
                             messages_history.append({"role": "user", "content": user_input})
                             messages_history.append({"role": "assistant", "content": f"任务执行失败: {failure_reason}"})
                             
+                            # 主动清理线程池
+                            cleanup_thread_pools()
+                            
+
                             return f"任务执行失败: {failure_reason}"
                     except Exception as e:
                         # 获取用户输入失败时的处理
-                        print_error(f"获取用户输入失败: {str(e)}，默认继续尝试")
+                        print_warning(f"获取用户输入失败: {str(e)}，默认继续尝试")
                         
                         # 添加到对话
                         planning_messages.append({
                             "role": "user", 
-                            "content": "尽管任务看起来很困难，但我们需要继续尝试。请采用全新思路寻找解决方案。"
+                            "content": "系统默认继续尝试。请采用全新思路寻找解决方案。"
                         })
                         
                         # 重置迭代计数，相当于给予全新的尝试机会
@@ -1293,27 +1403,89 @@ def reset_messages():
     global messages
     messages = [{"role": "system","content": " 你叫小美，是一个热情的ai助手，这些是用户的一些关键信息，可能有用: "+user_information_read()}] 
 
-if __name__ == "__main__":
-    if not os.path.exists("user_information.txt"):
-        with open("user_information.txt", "w", encoding="utf-8") as file:
-            file.write("用户关键信息表:user_information.txt")
-        print(f"文件 '{"user_information.txt"}' 已创建")
+# 添加一个线程池清理辅助函数
+def cleanup_thread_pools():
+    """清理不再使用的线程池，防止程序卡住"""
+    # 使用更安全的方式关闭线程池
+    if hasattr(concurrent.futures, '_thread_executors'):
+        for executor in list(concurrent.futures._thread_executors):
+            if hasattr(executor, '_shutdown') and executor._shutdown:
+                try:
+                    concurrent.futures._thread_executors.remove(executor)
+                except:
+                    pass
+    # 如果我们自己维护了线程池列表，也可以清理它们
+    if hasattr(get_user_input_async, 'executors'):
+        for executor in list(get_user_input_async.executors):
+            try:
+                if not executor._shutdown:
+                    executor.shutdown(wait=False)
+                get_user_input_async.executors.remove(executor)
+            except:
+                pass
 
+if __name__ == "__main__":
+    # 使用从user_information_read函数获取用户信息
+    # 该函数会自动确保文件存在，不需要在这里手动创建
+    user_info = user_information_read()
+    
     print("程序启动成功")
-    while True:
+    
+    # 注册程序退出时的清理函数
+    def cleanup_resources():
+        """清理程序资源，确保线程池正确关闭"""
+        print("\n正在清理资源...")
+        
+        # 安全关闭线程池
+        # 避免直接访问内部属性
         try:
-            input_message = input("\n输入消息: ")
+            # 尝试关闭任何可能存在的线程池
+            cleanup_thread_pools()
             
-            if input_message:
-                result = asyncio.run(main(input_message))
-                # 只有当返回值明确为False时才退出循环
-                if result is False:
-                    break
-        except KeyboardInterrupt:
-            print("\n程序已被用户中断")
-            break
+            # 清理TimerThread实例
+            from input_utils import TimerThread
+            if hasattr(TimerThread, 'cleanup_timer_threads'):
+                TimerThread.cleanup_timer_threads()
+            
+            # 确保任何导入的模块中的线程池也被关闭
+            for module_name in list(sys.modules.keys()):
+                module = sys.modules[module_name]
+                if hasattr(module, 'executor') and hasattr(module.executor, 'shutdown'):
+                    try:
+                        module.executor.shutdown(wait=False)
+                    except:
+                        pass
         except Exception as e:
-            print("\n===== 主程序错误 =====")
-            print(f"错误类型: {type(e)}")
-            print(f"错误信息: {str(e)}")
-            print("=====================\n")
+            print(f"关闭线程池时出错: {str(e)}")
+        
+        print("资源清理完成")
+    
+    import atexit
+    atexit.register(cleanup_resources)
+    
+    try:
+        while True:
+            try:
+                input_message = input("\n输入消息: ")
+                
+                if input_message:
+                    result = asyncio.run(main(input_message))
+                    # 只有当返回值明确为False时才退出循环
+                    if result is False:
+                        break
+                    
+                    # 主动清理线程池
+                    cleanup_thread_pools()
+                    
+            except KeyboardInterrupt:
+                print("\n程序已被用户中断")
+                break
+            except Exception as e:
+                print("\n===== 主程序错误 =====")
+                print(f"错误类型: {type(e)}")
+                print(f"错误信息: {str(e)}")
+                print("=====================\n")
+                
+    finally:
+        # 确保在程序结束时清理资源
+        cleanup_resources()

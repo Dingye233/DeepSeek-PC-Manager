@@ -10,14 +10,27 @@ from openai import OpenAI
 
 # 读取用户信息
 def user_information_read() -> str:
+    # 使用用户文档目录作为存储位置
     try:
+        user_docs = os.path.join(os.path.expanduser("~"), "Documents", "DeepSeek-PC-Manager")
+        if not os.path.exists(user_docs):
+            os.makedirs(user_docs)
+        
+        file_path = os.path.join(user_docs, "user_information.txt")
+        
         # 尝试打开文件并读取内容
-        with open("user_information.txt", "r", encoding="utf-8") as file:
+        if not os.path.exists(file_path):
+            # 如果文件不存在，创建一个带默认内容的文件
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write("用户关键信息表:user_information.txt\n")
+            print(f"已创建用户信息文件: {file_path}")
+            
+        with open(file_path, "r", encoding="utf-8") as file:
             content = file.read()
         return content
     except FileNotFoundError:
         # 如果文件不存在，捕获异常并返回提示信息
-        return f"错误：找不到文件 '{"user_information.txt"}'，请检查路径是否正确。"
+        return f"错误：找不到文件 '{file_path}'，请检查路径是否正确。"
     except Exception as e:
         # 捕获其他可能的异常（如编码错误）
         return f"读取文件时发生错误：{e}"
@@ -477,8 +490,71 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
         
         # 将超时信息添加到结果中
         buffer += f"\n\n{'-'*50}\n[系统] 命令执行超时 ({timeout}秒)。{timeout_analysis}\n{'-'*50}\n"
+    
+    # 限制输出长度，避免token超限
+    MAX_CHARS = 30000
+    if len(buffer) > MAX_CHARS:
+        # 生成输出摘要
+        summary = generate_output_summary(buffer, client)
+        
+        # 截取最后的部分
+        truncated_buffer = buffer[-MAX_CHARS:]
+        # 找到第一个完整行的开始位置
+        first_newline = truncated_buffer.find('\n')
+        if first_newline > 0:
+            truncated_buffer = truncated_buffer[first_newline+1:]
+        
+        # 添加截断提示和摘要
+        truncated_buffer = f"\n===== 输出摘要 =====\n{summary}\n===================\n\n... [输出过长，已截断前面 {len(buffer) - MAX_CHARS} 个字符] ...\n" + truncated_buffer
+        print_warning(f"输出过长（{len(buffer)} 字符），已自动截断并生成摘要")
+        return truncated_buffer
         
     return buffer
+
+# 生成命令输出摘要
+def generate_output_summary(output, client):
+    """使用LLM生成命令输出的摘要"""
+    try:
+        # 提取输出的前后部分用于分析
+        head = output[:2000] if len(output) > 2000 else output
+        tail = output[-2000:] if len(output) > 4000 else output[len(head):]
+        
+        # 构建提示
+        prompt = f"""以下是一个控制台命令的输出内容，请简要总结其中的关键信息（200字以内）。
+特别注意：
+1. 错误信息和警告
+2. 操作结果和成功状态
+3. 重要的数据或统计信息
+4. 任何异常情况
+
+输出内容前部分:
+```
+{head}
+```
+
+{f"输出内容后部分(总长度约 {len(output)} 字符):" if len(output) > 4000 else ""}
+{f"```\n{tail}\n```" if len(output) > 4000 else ""}
+
+请提供简洁的摘要，重点关注关键信息和操作结果。
+"""
+        
+        # 调用API生成摘要
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "你是一个专业的命令输出分析助手，擅长提取和总结控制台输出中的关键信息。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=300
+        )
+        
+        summary = response.choices[0].message.content
+        return summary
+    
+    except Exception as e:
+        print_error(f"生成输出摘要失败: {str(e)}")
+        return "无法生成输出摘要，可能是由于文本过长或API错误。"
 
 # CMD命令执行
 async def cmd_command(command: str, timeout: int = 60) -> str:
@@ -888,5 +964,23 @@ async def cmd_command(command: str, timeout: int = 60) -> str:
         
         # 将超时信息添加到结果中
         buffer += f"\n\n{'-'*50}\n[系统] 命令执行超时 ({timeout}秒)。{timeout_analysis}\n{'-'*50}\n"
+    
+    # 限制输出长度，避免token超限
+    MAX_CHARS = 30000
+    if len(buffer) > MAX_CHARS:
+        # 生成输出摘要
+        summary = generate_output_summary(buffer, client)
+        
+        # 截取最后的部分
+        truncated_buffer = buffer[-MAX_CHARS:]
+        # 找到第一个完整行的开始位置
+        first_newline = truncated_buffer.find('\n')
+        if first_newline > 0:
+            truncated_buffer = truncated_buffer[first_newline+1:]
+        
+        # 添加截断提示和摘要
+        truncated_buffer = f"\n===== 输出摘要 =====\n{summary}\n===================\n\n... [输出过长，已截断前面 {len(buffer) - MAX_CHARS} 个字符] ...\n" + truncated_buffer
+        print_warning(f"输出过长（{len(buffer)} 字符），已自动截断并生成摘要")
+        return truncated_buffer
         
     return buffer 
