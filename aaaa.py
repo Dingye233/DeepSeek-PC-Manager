@@ -5,10 +5,8 @@ import asyncio
 from playsound import playsound
 import os
 import tempfile
-import requests
 import get_email
 import speech_recognition as sr
-import keyboard
 import time
 import subprocess
 import re
@@ -23,15 +21,13 @@ import code_tools  # 导入新的代码工具模块
 import file_reader  # 导入文件读取工具
 import tool_registry  # 导入工具注册模块
 import traceback
-import edge_tts
-import tiktoken
 from console_utils import print_color, print_success, print_error, print_warning, print_info, print_highlight
 from system_utils import powershell_command, user_information_read, cmd_command
 load_dotenv()
 from voice_utils import tts, recognize_speech
 from weather_utils import get_weather
 from time_utils import get_current_time
-from input_utils import get_user_input_async
+from input_utils import get_user_input_async, cancel_active_input, cleanup_thread_pools
 from file_utils import user_information_read
 from error_utils import parse_error_message, task_error_analysis
 from message_utils import num_tokens_from_messages, clean_message_history, clear_context
@@ -292,42 +288,95 @@ async def execute_task_with_planning(user_input, messages_history):
                 async def ask_user_to_continue(messages):
                     """询问用户是否继续尝试任务，即使智能体认为无法完成"""
                     try:
-                        user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？\n(输入您的想法或指示，不限于简单的继续/终止选择): ", 120)
+                        # 确保取消任何活跃的输入任务
+                        cancel_active_input()
                         
-                        if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
-                            # 用户选择继续尝试或提供了其他建议
-                            print_info(f"\n用户输入: {user_choice}")
+                        # 确保is_task_complete变量存在
+                        nonlocal is_task_complete
+                        
+                        try:
+                            user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？\n(输入您的想法或指示，不限于简单的继续/终止选择): ", 60)
                             
-                            # 重置任务失败标记
-                            nonlocal is_task_complete
-                            is_task_complete = False
+                            if user_choice is None:
+                                # 超时默认继续执行
+                                print_warning("用户输入超时，默认继续尝试任务")
+                                # 默认继续尝试而非终止
+                                messages.append({
+                                    "role": "user", 
+                                    "content": "系统默认继续尝试。请采用全新思路寻找解决方案。"
+                                })
+                                
+                                # 发送默认决策消息到GUI
+                                if 'message_queue' in globals():
+                                    message_queue.put({
+                                        "type": "tool_result",
+                                        "text": "用户输入超时，系统默认继续尝试"
+                                    })
+                                
+                                return False, False  # 不终止任务，不失败
                             
-                            # 添加用户反馈到对话
+                            if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
+                                # 用户选择继续尝试或提供了其他建议
+                                print_info(f"\n用户输入: {user_choice}")
+                                
+                                # 重置任务失败标记
+                                nonlocal is_task_complete
+                                is_task_complete = False
+                                
+                                # 添加用户反馈到对话
+                                messages.append({
+                                    "role": "user", 
+                                    "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
+                                })
+                                
+                                # 发送继续尝试的消息到GUI
+                                if 'message_queue' in globals():
+                                    message_queue.put({
+                                        "type": "tool_result",
+                                        "text": f"收到用户反馈: {user_choice}"
+                                    })
+                                
+                                return False, False  # 不终止任务，不失败
+                            else:
+                                # 用户确认终止
+                                print_warning("\n用户选择终止任务。")
+                                return True, True  # 终止任务，标记失败
+                                
+                        except asyncio.CancelledError:
+                            # 处理取消异常，默认继续执行
+                            print_warning("输入过程被取消，默认继续尝试任务")
+                            # 默认继续尝试而非终止
                             messages.append({
                                 "role": "user", 
-                                "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
+                                "content": "系统检测到输入被取消，默认继续尝试。请采用全新思路寻找解决方案。"
                             })
                             
-                            # 发送继续尝试的消息到GUI
+                            # 发送默认决策消息到GUI
                             if 'message_queue' in globals():
                                 message_queue.put({
                                     "type": "tool_result",
-                                    "text": f"收到用户反馈: {user_choice}"
+                                    "text": "输入被取消，系统默认继续尝试"
                                 })
                             
                             return False, False  # 不终止任务，不失败
-                        else:
-                            # 用户确认终止
-                            print_warning("\n用户选择终止任务。")
-                            return True, True  # 终止任务，标记失败
+                            
                     except Exception as e:
-                        # 获取用户输入失败时的处理
-                        print_error(f"获取用户输入失败: {str(e)}，默认继续尝试")
-                        # 默认继续尝试而非终止
+                        # 获取用户输入失败时的处理，默认继续执行
+                        print_warning(f"获取用户输入失败: {str(e)}，默认继续尝试")
+                        
+                        # 添加到对话
                         messages.append({
                             "role": "user", 
-                            "content": "尽管任务看起来很困难，但我们需要继续尝试。请采用全新思路寻找解决方案。"
+                            "content": "系统默认继续尝试。请采用全新思路寻找解决方案。"
                         })
+                        
+                        # 发送到GUI
+                        if 'message_queue' in globals():
+                            message_queue.put({
+                                "type": "tool_result",
+                                "text": "用户输入处理出错，系统默认继续尝试"
+                            })
+                        
                         return False, False  # 不终止任务，不失败
                 
                 # 内部递归验证循环
@@ -473,6 +522,11 @@ async def execute_task_with_planning(user_input, messages_history):
                                     result = f"用户输入: {user_input}" if user_input else "用户未提供输入（超时）"
                                 elif func_name == "read_file":
                                     result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
+                                elif func_name == "list_directory" or func_name == "list_dir":
+                                    # 处理已废弃的工具
+                                    error_message = f"工具 '{func_name}' 已被废弃，请使用 'powershell_command' 工具执行 'Get-ChildItem' 命令或 'cmd_command' 工具执行 'dir' 命令来列出目录内容。"
+                                    print_warning(error_message)
+                                    result = error_message
                                 else:
                                     raise ValueError(f"未定义的工具调用: {func_name}")
                                 
@@ -1315,6 +1369,11 @@ async def execute_simple_task(user_input, messages_history):
                             result = f"用户输入: {user_input_data}" if user_input_data else "用户未提供输入（超时）"
                         elif func_name == "read_file":
                             result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
+                        elif func_name == "list_directory" or func_name == "list_dir":
+                            # 处理已废弃的工具
+                            error_message = f"工具 '{func_name}' 已被废弃，请使用 'powershell_command' 工具执行 'Get-ChildItem' 命令或 'cmd_command' 工具执行 'dir' 命令来列出目录内容。"
+                            print_warning(error_message)
+                            result = error_message
                         else:
                             raise ValueError(f"未定义的工具调用: {func_name}")
                         
@@ -1423,7 +1482,26 @@ async def execute_simple_task(user_input, messages_history):
                 elif "[任务失败]" in assessment_result:
                     # 询问用户是否继续尝试
                     try:
-                        user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？\n(输入您的想法或指示，不限于简单的继续/终止选择): ", 120)
+                        user_choice = await get_user_input_async("智能体认为任务无法完成。您是否希望继续尝试，或者有其他建议？\n(输入您的想法或指示，不限于简单的继续/终止选择): ", 60)
+                        
+                        if user_choice is None:
+                            # 用户输入超时，默认继续尝试
+                            print_warning("\n用户输入超时，系统默认继续尝试")
+                            
+                            # 添加系统默认决策到对话
+                            planning_messages.append({
+                                "role": "user", 
+                                "content": "系统默认继续尝试。请采用全新思路寻找解决方案。"
+                            })
+                            
+                            # 发送到GUI
+                            if 'message_queue' in globals():
+                                message_queue.put({
+                                    "type": "tool_result",
+                                    "text": "用户输入超时，系统默认继续尝试"
+                                })
+                            
+                            continue
                         
                         if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
                             # 用户选择继续尝试或提供了其他建议
@@ -1462,15 +1540,23 @@ async def execute_simple_task(user_input, messages_history):
                             
                             return f"任务执行失败: {failure_reason}"
                     except Exception as e:
-                        # 获取用户输入失败时的处理
-                        print_error(f"获取用户输入失败: {str(e)}，默认继续尝试")
+                        # 获取用户输入失败时的处理，默认继续执行
+                        print_warning(f"获取用户输入失败: {str(e)}，默认继续尝试")
                         
                         # 添加到对话
-                        planning_messages.append({
+                        messages.append({
                             "role": "user", 
-                            "content": "尽管任务看起来很困难，但我们需要继续尝试。请采用全新思路寻找解决方案。"
+                            "content": "系统默认继续尝试。请采用全新思路寻找解决方案。"
                         })
-                        continue
+                        
+                        # 发送到GUI
+                        if 'message_queue' in globals():
+                            message_queue.put({
+                                "type": "tool_result",
+                                "text": "用户输入处理出错，系统默认继续尝试"
+                            })
+                        
+                        return False, False  # 不终止任务，不失败
                 
                 # 如果任务需要继续执行，添加执行提示
                 execute_prompt = """
@@ -1544,6 +1630,53 @@ async def execute_simple_task(user_input, messages_history):
 
 if __name__ == "__main__":
     print_success("AI助手启动中...")
+    
+    # 注册程序退出时的清理函数
+    def cleanup_resources():
+        """清理程序资源，确保线程池正确关闭"""
+        print("\n正在清理资源...")
+        
+        try:
+            # 使用input_utils中的清理函数
+            try:
+                from input_utils import cleanup_thread_pools
+                cleanup_thread_pools()
+                print("已使用input_utils清理线程池")
+            except Exception as e:
+                print(f"使用input_utils清理线程池失败: {str(e)}")
+                
+                # 作为备选，尝试使用deepseekAPI中的清理函数
+                try:
+                    from deepseekAPI import cleanup_thread_pools
+                    cleanup_thread_pools()
+                except:
+                    pass
+                
+            # 清理TimerThread实例
+            try:
+                from input_utils import TimerThread
+                if hasattr(TimerThread, 'cleanup_timer_threads'):
+                    TimerThread.cleanup_timer_threads()
+            except:
+                pass
+            
+            # 清理所有模块中的线程池
+            import sys
+            for module_name in list(sys.modules.keys()):
+                module = sys.modules[module_name]
+                if hasattr(module, 'executor') and hasattr(module.executor, 'shutdown'):
+                    try:
+                        module.executor.shutdown(wait=False)
+                    except:
+                        pass
+        except Exception as e:
+            print(f"关闭线程池时出错: {str(e)}")
+        
+        print("资源清理完成")
+    
+    import atexit
+    import sys  # 添加sys模块导入，如果没有
+    atexit.register(cleanup_resources)
     
     # 生成欢迎语音
     try:

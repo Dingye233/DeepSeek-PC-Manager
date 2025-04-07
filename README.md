@@ -324,3 +324,30 @@ python -c "import code_tools; print(code_tools.write_code('hello_world.py', 'pri
 ---
 
 感谢使用DeepSeek-PC-Manager！希望它能成为您的得力助手。
+
+## 打包为可执行文件
+
+项目支持打包为单独的可执行文件(EXE)，便于在没有Python环境的电脑上运行。
+
+### 打包步骤
+
+1. 安装依赖
+```
+pip install -r requirements.txt
+```
+
+2. 运行打包脚本
+```
+python package_exe.py
+```
+
+3. 打包完成后，可执行文件将位于 `dist/DeepSeek-PC-Manager` 目录中
+
+### 用户数据文件
+
+软件的用户数据文件(`user_information.txt`)将存储在用户的Documents目录下:
+```
+%USERPROFILE%\Documents\DeepSeek-PC-Manager\user_information.txt
+```
+
+用户可以根据需要自由编辑此文件，软件会自动读取最新的内容。首次运行时会自动创建此文件。
