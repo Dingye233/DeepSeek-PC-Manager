@@ -22,6 +22,25 @@ def num_tokens_from_messages(messages, model="deepseek-chat"):
         
         num_tokens = 0
         for message in messages:
+            # 处理可能的ChatCompletionMessage对象
+            if not isinstance(message, dict):
+                # 如果不是字典，尝试获取其属性
+                try:
+                    # 创建一个字典来处理非字典类型的消息对象
+                    msg_dict = {}
+                    if hasattr(message, 'role'):
+                        msg_dict['role'] = message.role
+                    if hasattr(message, 'content'):
+                        msg_dict['content'] = message.content
+                    if hasattr(message, 'name'):
+                        msg_dict['name'] = message.name
+                    if hasattr(message, 'tool_calls'):
+                        msg_dict['tool_calls'] = message.tool_calls
+                    message = msg_dict
+                except:
+                    # 如果无法处理，则跳过
+                    continue
+            
             # 每条消息的基础token数
             num_tokens += 4  # 每条消息有固定的开销
             
@@ -51,7 +70,20 @@ def num_tokens_from_messages(messages, model="deepseek-chat"):
         return num_tokens
     except Exception as e:
         # 出错时使用简单估算方法
-        return sum(len(str(m.get("content", ""))) // 3 for m in messages) + 20
+        try:
+            token_sum = 0
+            for m in messages:
+                if isinstance(m, dict) and 'content' in m:
+                    content = m['content']
+                    if content:
+                        token_sum += len(str(content)) // 3
+                elif hasattr(m, 'content'):
+                    content = m.content
+                    if content:
+                        token_sum += len(str(content)) // 3
+            return token_sum + 20
+        except:
+            return 1000  # 如果完全无法估算，返回一个默认值
 
 # LLM评估消息重要性
 async def evaluate_message_importance(messages, client, max_tokens=30000):
@@ -71,39 +103,54 @@ async def evaluate_message_importance(messages, client, max_tokens=30000):
     
     # 准备评估消息
     # 不包含system消息，因为它们总是被保留
-    non_system_messages = [msg for i, msg in enumerate(messages) if msg["role"] != "system"]
+    non_system_messages = []
+    for msg in messages:
+        # 处理可能的ChatCompletionMessage对象
+        role = msg['role'] if isinstance(msg, dict) else msg.role if hasattr(msg, 'role') else None
+        if role != "system":
+            non_system_messages.append(msg)
     
     # 准备消息的简短描述，供LLM评估
     message_summaries = []
     for i, msg in enumerate(non_system_messages):
+        # 处理可能的ChatCompletionMessage对象
+        if isinstance(msg, dict):
+            role = msg.get('role', '')
+            content = msg.get('content', '')
+            tool_calls = msg.get('tool_calls', [])
+            tool_call_id = msg.get('tool_call_id', '未知')
+        else:
+            role = msg.role if hasattr(msg, 'role') else ''
+            content = msg.content if hasattr(msg, 'content') else ''
+            tool_calls = msg.tool_calls if hasattr(msg, 'tool_calls') else []
+            tool_call_id = getattr(msg, 'tool_call_id', '未知') if hasattr(msg, 'tool_call_id') else '未知'
+            
         # 为不同类型的消息创建概要
-        if msg["role"] == "user":
-            content = msg.get("content", "")
+        if role == "user":
             # 如果内容太长，截断它
             if len(content) > 100:
                 content = content[:97] + "..."
             message_summaries.append(f"索引 {i}: 用户消息 - '{content}'")
         
-        elif msg["role"] == "assistant":
-            if msg.get("tool_calls"):
+        elif role == "assistant":
+            if tool_calls:
                 tool_names = []
-                for tc in msg.get("tool_calls", []):
-                    if isinstance(tc, dict) and tc.get("function", {}).get("name"):
-                        tool_names.append(tc["function"]["name"])
+                for tc in tool_calls:
+                    if isinstance(tc, dict) and 'function' in tc and 'name' in tc['function']:
+                        tool_names.append(tc['function']['name'])
+                    elif hasattr(tc, 'function') and hasattr(tc.function, 'name'):
+                        tool_names.append(tc.function.name)
                 tool_str = ", ".join(tool_names)
                 message_summaries.append(f"索引 {i}: 助手消息 - 工具调用: {tool_str}")
             else:
-                content = msg.get("content", "")
                 if content and len(content) > 100:
                     content = content[:97] + "..."
                 message_summaries.append(f"索引 {i}: 助手消息 - '{content}'")
         
-        elif msg["role"] == "tool":
-            tool_id = msg.get("tool_call_id", "未知")
-            content = msg.get("content", "")
+        elif role == "tool":
             if content and len(content) > 100:
                 content = content[:97] + "..."
-            message_summaries.append(f"索引 {i}: 工具结果 - ID:{tool_id}, '{content}'")
+            message_summaries.append(f"索引 {i}: 工具结果 - ID:{tool_call_id}, '{content}'")
     
     # 准备评估提示
     evaluation_prompt = f"""
@@ -167,7 +214,16 @@ async def clean_message_history_with_llm(messages, client, max_tokens=30000):
     print_info(f"\n===== Token数量超过阈值，使用LLM清理消息历史 =====")
     
     # 保留system消息
-    system_messages = [msg for msg in messages if msg["role"] == "system"]
+    system_messages = []
+    for msg in messages:
+        # 处理可能的ChatCompletionMessage对象
+        if isinstance(msg, dict):
+            role = msg.get('role', '')
+        else:
+            role = msg.role if hasattr(msg, 'role') else ''
+        
+        if role == "system":
+            system_messages.append(msg)
     
     # 获取LLM的清理建议
     evaluation_result = await evaluate_message_importance(messages, client, max_tokens)
@@ -181,7 +237,16 @@ async def clean_message_history_with_llm(messages, client, max_tokens=30000):
     to_keep_indices = evaluation_result.get("to_keep", [])
     
     # 获取非系统消息
-    non_system_messages = [msg for msg in messages if msg["role"] != "system"]
+    non_system_messages = []
+    for msg in messages:
+        # 处理可能的ChatCompletionMessage对象
+        if isinstance(msg, dict):
+            role = msg.get('role', '')
+        else:
+            role = msg.role if hasattr(msg, 'role') else ''
+        
+        if role != "system":
+            non_system_messages.append(msg)
     
     # 根据索引保留重要消息
     kept_messages = []
@@ -195,50 +260,122 @@ async def clean_message_history_with_llm(messages, client, max_tokens=30000):
     
     # 收集所有工具调用ID
     for i, msg in enumerate(kept_messages):
-        if msg["role"] == "assistant" and msg.get("tool_calls"):
-            for tool_call in msg.get("tool_calls", []):
-                if isinstance(tool_call, dict) and tool_call.get("id"):
-                    tool_call_ids.append(tool_call["id"])
+        # 处理可能的ChatCompletionMessage对象
+        if isinstance(msg, dict):
+            role = msg.get('role', '')
+            tool_calls = msg.get('tool_calls', [])
+        else:
+            role = msg.role if hasattr(msg, 'role') else ''
+            tool_calls = msg.tool_calls if hasattr(msg, 'tool_calls') else []
+        
+        if role == "assistant" and tool_calls:
+            for tool_call in tool_calls:
+                if isinstance(tool_call, dict) and 'id' in tool_call:
+                    tool_call_ids.append(tool_call['id'])
+                elif hasattr(tool_call, 'id'):
+                    tool_call_ids.append(tool_call.id)
     
     # 检查每个工具调用是否有对应响应
-    response_ids = [msg.get("tool_call_id") for msg in kept_messages if msg["role"] == "tool"]
-    missing_responses = set(tool_call_ids) - set(response_ids)
+    response_ids = []
+    for msg in kept_messages:
+        # 处理可能的ChatCompletionMessage对象
+        if isinstance(msg, dict):
+            role = msg.get('role', '')
+            tool_call_id = msg.get('tool_call_id', '')
+        else:
+            role = msg.role if hasattr(msg, 'role') else ''
+            tool_call_id = msg.tool_call_id if hasattr(msg, 'tool_call_id') else ''
+        
+        if role == "tool" and tool_call_id:
+            response_ids.append(tool_call_id)
     
-    # 如果有未匹配的工具调用，从kept_messages中移除
-    if missing_responses:
-        print_warning(f"有{len(missing_responses)}个工具调用没有对应响应，将移除这些调用")
-        for i, msg in enumerate(kept_messages):
-            if msg["role"] == "assistant" and msg.get("tool_calls"):
-                new_tool_calls = []
-                for tool_call in msg.get("tool_calls", []):
-                    if tool_call.get("id") not in missing_responses:
-                        new_tool_calls.append(tool_call)
+    # 确保保留的消息中有完整的工具调用链
+    for msg in non_system_messages:
+        # 处理可能的ChatCompletionMessage对象
+        if isinstance(msg, dict):
+            role = msg.get('role', '')
+            tool_calls = msg.get('tool_calls', [])
+            tool_call_id = msg.get('tool_call_id', '')
+        else:
+            role = msg.role if hasattr(msg, 'role') else ''
+            tool_calls = msg.tool_calls if hasattr(msg, 'tool_calls') else []
+            tool_call_id = msg.tool_call_id if hasattr(msg, 'tool_call_id') else ''
+        
+        # 如果是助手消息，检查是否有工具调用没有对应响应
+        if role == "assistant" and tool_calls:
+            for tool_call in tool_calls:
+                tc_id = None
+                if isinstance(tool_call, dict) and 'id' in tool_call:
+                    tc_id = tool_call['id']
+                elif hasattr(tool_call, 'id'):
+                    tc_id = tool_call.id
                 
-                if not new_tool_calls:
-                    messages_to_remove.append(i)
+                if tc_id and tc_id in tool_call_ids and tc_id not in response_ids:
+                    # 找到工具响应并添加到保留消息中
+                    for response_msg in non_system_messages:
+                        if isinstance(response_msg, dict):
+                            resp_role = response_msg.get('role', '')
+                            resp_id = response_msg.get('tool_call_id', '')
+                        else:
+                            resp_role = response_msg.role if hasattr(response_msg, 'role') else ''
+                            resp_id = response_msg.tool_call_id if hasattr(response_msg, 'tool_call_id') else ''
+                        
+                        if resp_role == "tool" and resp_id == tc_id and response_msg not in kept_messages:
+                            kept_messages.append(response_msg)
+                            response_ids.append(tc_id)
+        
+        # 如果是工具响应消息，检查是否有对应的工具调用消息
+        elif role == "tool" and tool_call_id and tool_call_id in tool_call_ids and msg not in kept_messages:
+            # 确认是否有对应的调用消息
+            has_call = False
+            for call_msg in kept_messages:
+                if isinstance(call_msg, dict):
+                    call_role = call_msg.get('role', '')
+                    call_tool_calls = call_msg.get('tool_calls', [])
                 else:
-                    kept_messages[i]["tool_calls"] = new_tool_calls
+                    call_role = call_msg.role if hasattr(call_msg, 'role') else ''
+                    call_tool_calls = call_msg.tool_calls if hasattr(call_msg, 'tool_calls') else []
+                
+                if call_role == "assistant" and call_tool_calls:
+                    for tc in call_tool_calls:
+                        tc_id = None
+                        if isinstance(tc, dict) and 'id' in tc:
+                            tc_id = tc['id']
+                        elif hasattr(tc, 'id'):
+                            tc_id = tc.id
+                        
+                        if tc_id == tool_call_id:
+                            has_call = True
+                            break
+                
+                if has_call:
+                    break
+            
+            # 如果没有对应的调用消息，该响应消息无用
+            if not has_call:
+                messages_to_remove.append(msg)
     
-    # 移除标记为删除的消息
-    kept_messages = [msg for i, msg in enumerate(kept_messages) if i not in messages_to_remove]
+    # 移除不需要的消息
+    for msg in messages_to_remove:
+        if msg in kept_messages:
+            kept_messages.remove(msg)
     
-    # 组合清理后的消息
+    # 构建最终清理后的消息列表
     cleaned_messages = system_messages + kept_messages
     
-    # 如果仍然超过限制，使用默认方法进一步减少
-    if num_tokens_from_messages(cleaned_messages) > max_tokens:
-        print_warning("LLM清理后仍超过token限制，使用默认方法进一步清理")
-        return clean_message_history(cleaned_messages, max_tokens)
+    # 验证token数量是否在目标范围内
+    final_tokens = num_tokens_from_messages(cleaned_messages)
+    if final_tokens > max_tokens:
+        print_warning(f"LLM清理后token仍然超过目标（{final_tokens} > {max_tokens}），使用默认清理方法")
+        return clean_message_history(messages, max_tokens)
     
-    current_tokens = num_tokens_from_messages(cleaned_messages)
-    print_info(f"LLM清理后token数量: {current_tokens} (目标: {max_tokens})")
-    
+    print_success(f"消息历史清理完成: {len(messages)} -> {len(cleaned_messages)} 条消息, {final_tokens} tokens")
     return cleaned_messages
 
 # 更新后的clean_message_history函数，更高效的实现
 def clean_message_history(messages, max_tokens=30000):
     """
-    清理消息历史，保留重要信息并减少token数量
+    清理消息历史，保留重要消息并减少token数量
     :param messages: 消息列表
     :param max_tokens: 目标token数量
     :return: 清理后的消息列表
@@ -247,69 +384,72 @@ def clean_message_history(messages, max_tokens=30000):
     if current_tokens <= max_tokens:
         return messages
     
-    print_info(f"\n===== Token数量超过阈值 ({current_tokens}>{max_tokens})，正在清理消息历史 =====")
+    print_info(f"\n===== 清理消息历史 =====")
+    print_info(f"当前token数: {current_tokens}, 目标: {max_tokens}")
     
-    # 保留system消息，它们通常很重要
-    system_messages = [msg for msg in messages if msg["role"] == "system"]
-    system_tokens = num_tokens_from_messages(system_messages)
+    # 分离系统消息和非系统消息
+    system_messages = []
+    non_system_messages = []
     
-    # 剩余可用token
-    remaining_tokens = max_tokens - system_tokens
+    for msg in messages:
+        # 处理可能的ChatCompletionMessage对象
+        if isinstance(msg, dict):
+            role = msg.get('role', '')
+        else:
+            role = msg.role if hasattr(msg, 'role') else ''
+        
+        if role == "system":
+            system_messages.append(msg)
+        else:
+            non_system_messages.append(msg)
     
-    # 如果仅system消息就超过了限制，则必须裁剪system消息
-    if system_tokens > max_tokens * 0.8:  # 允许system消息最多占用80%的配额
-        print_warning("系统消息占用token过多，将裁剪部分系统消息")
-        # 按重要性排序：保留第一条和最后一条system消息
-        if len(system_messages) > 2:
-            system_messages = [system_messages[0], system_messages[-1]]
-            # 重新计算system消息的token数
-            system_tokens = num_tokens_from_messages(system_messages)
-            remaining_tokens = max_tokens - system_tokens
+    # 保留最近的20条消息（可能超过token限制）
+    kept_recent = non_system_messages[-20:] if len(non_system_messages) > 20 else non_system_messages
     
-    # 其余非系统消息
-    non_system_messages = [msg for msg in messages if msg["role"] != "system"]
+    # 如果仍然超过限制，递归减半保留之前的消息
+    cleaned_messages = system_messages + kept_recent
     
-    # 如果没有非系统消息，直接返回系统消息
-    if not non_system_messages:
-        return system_messages
+    if num_tokens_from_messages(cleaned_messages) > max_tokens and len(kept_recent) > 2:
+        # 递归减半，直到满足token限制
+        half_size = len(kept_recent) // 2
+        return clean_message_history(system_messages + kept_recent[-half_size:], max_tokens)
     
-    # 为了保留对话连贯性，我们需要保留最近的消息
-    # 估计每条消息的平均token数
-    avg_msg_tokens = (current_tokens - system_tokens) / len(non_system_messages)
-    
-    # 估计可以保留的消息数量
-    keep_msg_count = int(remaining_tokens / avg_msg_tokens * 0.95)  # 预留5%的余量
-    
-    # 确保至少保留几条最近消息
-    keep_msg_count = max(keep_msg_count, min(4, len(non_system_messages)))
-    
-    # 保留最近的消息
-    kept_messages = non_system_messages[-keep_msg_count:]
-    
-    # 组合最终的消息列表
-    cleaned_messages = system_messages + kept_messages
-    
-    # 验证清理后的token数量
-    final_tokens = num_tokens_from_messages(cleaned_messages)
-    
-    # 如果仍然超出限制，递归调用直到满足要求
-    if final_tokens > max_tokens:
-        # 进一步减少保留的消息数量
-        print_warning(f"第一次清理后仍超过限制 ({final_tokens}>{max_tokens})，继续清理...")
-        # 递归调用，但减少目标token以确保一定能满足
-        return clean_message_history(cleaned_messages, max_tokens - 1000)
-    
-    print_success(f"清理完成，从 {current_tokens} 减少到 {final_tokens} tokens，保留了 {len(kept_messages)}/{len(non_system_messages)} 条非系统消息")
+    current_tokens = num_tokens_from_messages(cleaned_messages)
+    print_info(f"清理后token数量: {current_tokens} (目标: {max_tokens})")
     
     return cleaned_messages
 
 # 清除对话上下文
 def clear_context(messages: list) -> list:
     """
-    清除对话上下文
-    :param messages: 当前的对话历史
-    :return: 清空后的对话历史，只保留系统消息
+    清除对话历史上下文，只保留系统消息
+    :param messages: 消息列表
+    :return: 只包含系统消息的消息列表
     """
-    # 保留系统消息，清除其他消息
-    system_messages = [msg for msg in messages if msg["role"] == "system"]
-    return system_messages 
+    try:
+        # 创建一个新的消息列表，只包含系统消息
+        system_messages = []
+        for msg in messages:
+            # 处理可能的ChatCompletionMessage对象
+            if isinstance(msg, dict):
+                role = msg.get('role', '')
+            else:
+                role = msg.role if hasattr(msg, 'role') else ''
+            
+            if role == "system":
+                system_messages.append(msg)
+        
+        if not system_messages:
+            # 如果没有系统消息，返回一个空列表
+            return []
+        
+        # 添加一条助手消息，说明上下文已清除
+        system_messages.append({
+            "role": "assistant",
+            "content": "上下文已清除。我已经忘记了之前的对话内容，但仍然保留了关于如何与您互动的基本指导。"
+        })
+        
+        return system_messages
+    except Exception as e:
+        print_error(f"清除上下文时出错: {str(e)}")
+        return messages  # 出错时返回原始消息列表 

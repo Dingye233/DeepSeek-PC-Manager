@@ -236,6 +236,19 @@ def cancel_active_input():
     return True
 
 
+# 全局变量，存储GUI输入回调函数
+_gui_input_callback = None
+
+def register_input_callback(callback):
+    """注册用户输入回调处理函数，用于GUI界面显示输入对话框
+    
+    Args:
+        callback: 接收两个参数(prompt, timeout)的函数，GUI会显示对话框
+    """
+    global _gui_input_callback
+    _gui_input_callback = callback
+
+
 # 加强版的异步用户输入函数
 async def get_user_input_async(prompt: str, timeout: int = 30) -> Optional[str]:
     """
@@ -340,18 +353,33 @@ async def get_user_input_async(prompt: str, timeout: int = 30) -> Optional[str]:
 
 
 # 询问用户是否继续的函数 - 高可靠性版本
-async def ask_user_to_continue(planning_messages, is_task_complete=None):
+async def ask_user_to_continue(planning_messages, is_task_complete=None, is_direct_tool_call=False, error_message=None):
     """
     询问用户是否继续尝试任务，即使智能体认为无法完成
     
     Args:
         planning_messages: 当前对话消息列表
         is_task_complete: 任务是否完成的标志（保留参数兼容性）
+        is_direct_tool_call: 是否是agent直接调用input工具（而非系统自动触发）
+        error_message: 失败原因信息，如果有
     
     Returns:
         用户的选择: 继续尝试/终止
     """
+    global _gui_input_callback
+    
     try:
+        # 检查是否禁用工具调用确认
+        disable_tool_confirmation = os.getenv("DISABLE_TOOL_CONFIRMATION", "false").lower() == "true"
+        
+        # 如果禁用了工具调用确认且不是直接工具调用，则自动返回继续执行
+        if disable_tool_confirmation and not is_direct_tool_call:
+            planning_messages.append({
+                "role": "user", 
+                "content": "系统自动继续任务执行。"
+            })
+            return "继续尝试"
+            
         # 安全打印突出显示的文本
         def print_highlight(text):
             try:
@@ -359,20 +387,44 @@ async def ask_user_to_continue(planning_messages, is_task_complete=None):
             except:
                 print(text, flush=True)
         
+        # 如果有错误信息，先显示错误信息
+        if error_message:
+            print_highlight("\n===== 任务执行出错 =====")
+            print_highlight(f"错误信息: {error_message}")
+            print_highlight("=========================")
+            
+            # 在消息历史中也记录错误信息
+            planning_messages.append({
+                "role": "system", 
+                "content": f"任务执行出错: {error_message}"
+            })
+        
         print_highlight("\n===== 等待用户决策 =====")
         print_highlight("请输入您的想法或指示，按回车键提交")
         print_highlight("===========================")
         
-        prompt = """
-任务执行遇到困难，请选择:
+        # 构建提示信息，包含错误信息（如果有）
+        error_info = f"\n\n执行出错: {error_message}" if error_message else ""
+        prompt = f"""
+任务执行遇到困难{error_info}，请选择:
 1. 继续尝试 (直接输入建议或按回车)
 2. 终止任务 (输入数字2或"终止")
 
 您的选择是: """
         
-        # 修复：直接调用异步函数并等待结果
-        user_choice = await get_user_input_async(prompt, 60)
-            
+        # 检查是否有GUI回调
+        if _gui_input_callback:
+            # 使用GUI对话框获取输入
+            try:
+                # 直接调用回调函数并获取结果
+                user_choice = _gui_input_callback(prompt, 60)
+            except Exception as e:
+                print(f"调用GUI回调出错: {e}")
+                user_choice = None
+        else:
+            # 命令行模式，使用原有逻辑
+            user_choice = await get_user_input_async(prompt, 60)
+        
         # 如果用户输入超时，默认继续执行
         if user_choice is None:
             # 默认继续尝试而非终止

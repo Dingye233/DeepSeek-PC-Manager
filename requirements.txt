@@ -4,10 +4,11 @@ requests>=2.25.1
 asyncio>=3.4.3
 pyaudio
 pydub
-pyaudio-0.2.12-cp310-cp310-win_amd64.whl
 PyInstaller
 paramiko
 numpy
 pandas
-pyaudio-0.2.12-cp310-cp310-win_amd64.whl
+PyQt5>=5.15.0
+markdown>=3.3.0
+beautifulsoup4>=4.9.3
 

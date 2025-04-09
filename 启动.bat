@@ -17,20 +17,27 @@ if not exist "venv\Scripts\activate.bat" (
 REM 激活虚拟环境
 call venv\Scripts\activate.bat
 
-REM 安装核心依赖
-echo [INFO] 正在安装依赖...
-pip install numpy python-docx openpyxl python-pptx PyPDF2 tiktoken --quiet
+echo [INFO] 正在安装核心依赖...
+python -m pip install numpy python-docx openpyxl python-pptx PyPDF2 tiktoken openai python-dotenv requests asyncio psutil PyQt5 markdown beautifulsoup4 --quiet
 if errorlevel 1 (
-    echo [ERROR] 依赖安装失败！
-    pause
-    exit /b 1
+    echo [WARNING] 部分核心依赖安装失败，程序可能无法正常运行
+) else (
+    echo [INFO] 核心依赖安装成功
 )
 
-REM 运行主程序
+echo [INFO] 正在安装可选依赖...
+python -m pip install pyaudio --quiet
+python -m pip install pydub --quiet
+python -m pip install paramiko --quiet
+python -m pip install bs4 lxml --quiet
+REM python -m pip install playsound --quiet
+
+echo [INFO] 正在优化系统性能...
+powershell -Command "$Process = Get-Process -Id $PID; $Process.PriorityClass = 'AboveNormal'"
+
 echo [INFO] 正在启动DeepSeek-PC-Manager...
 python deepseekAPI.py
 
-REM 保持窗口
 echo.
 echo [INFO] 程序执行完毕
 pause

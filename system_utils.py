@@ -99,14 +99,16 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
     client = None
 
     # 设置PowerShell使用UTF-8输出
-    utf8_command = "$OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " + command
+    utf8_command = "$OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; chcp 65001 | Out-Null; " + command
 
+    # 修改进程创建方式，确保使用UTF-8编码
     proc = await asyncio.create_subprocess_exec(
         "powershell.exe", "-Command", utf8_command,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        limit=1024 * 1024  # 1MB缓冲区
+        limit=1024 * 1024,  # 1MB缓冲区
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}
     )
 
     output = []
@@ -138,7 +140,27 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
         if cache_key in encoding_cache:
             return encoding_cache[cache_key]
             
+        # 优先尝试UTF-8和GBK编码
         encodings = ['utf-8', 'gbk', 'gb18030', 'cp936', system_encoding]
+        
+        # 先快速检查是否有编码问题标志
+        tmp_result = None
+        try:
+            tmp_result = byte_data.decode('utf-8', errors='replace')
+        except:
+            pass
+            
+        # 如果检测到可能的乱码字符，使用特殊处理
+        if tmp_result and any(pattern in tmp_result for pattern in ['å', 'ç', 'é', '™', 'è', 'æ', 'ÿ']):
+            try:
+                # 尝试双重转码修复
+                result = byte_data.decode('latin-1').encode('latin-1').decode('utf-8', errors='replace')
+                encoding_cache[cache_key] = result
+                return result
+            except:
+                pass
+                
+        # 正常尝试各种编码
         for encoding in encodings:
             try:
                 result = byte_data.decode(encoding)
@@ -146,6 +168,7 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
                 return result
             except UnicodeDecodeError:
                 continue
+                
         # 如果所有编码都失败，使用latin-1（不会失败但可能显示不正确）
         result = byte_data.decode('latin-1')
         encoding_cache[cache_key] = result
@@ -292,7 +315,7 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
     
     async def watch_output(stream, is_stderr=False):
         """异步读取输出流，不限制控制台输出，实时显示所有内容"""
-        nonlocal buffer, current_output_length, context_buffer, interaction_count, last_output_time
+        nonlocal buffer, current_output_length, context_buffer, last_output_time
         
         # 定义一个计数器，用于跟踪连续空闲周期的数量
         idle_cycles = 0
@@ -538,7 +561,7 @@ def generate_output_summary(output, client):
 ```
 
 {f"输出内容后部分(总长度约 {len(output)} 字符):" if len(output) > 4000 else ""}
-{f"```\n{tail}\n```" if len(output) > 4000 else ""}
+{f"```\\n{tail}\\n```" if len(output) > 4000 else ""}
 
 请提供简洁的摘要，重点关注关键信息和操作结果。
 """
@@ -563,14 +586,14 @@ def generate_output_summary(output, client):
 
 # CMD命令执行
 async def cmd_command(command: str, timeout: int = 60) -> str:
-    """交互式命令执行函数，LLM直接以用户身份与命令提示符交互，支持超时设置"""
+    """命令行命令执行函数，支持超时设置"""
     # 获取系统默认编码
     system_encoding = locale.getpreferredencoding()
     
     # 命令开始执行时间
     start_time = time.time()
 
-    # 创建更复杂的交互模式检测模式
+    # 创建命令行交互模式检测模式
     interaction_pattern = re.compile(
         r'(?:Overwrite|确认|Enter|输入|密码|passphrase|file name|\[Y/N\]|是否继续|确定要|请输入|Press any key|Press Enter|Confirm|\(y/n\))',
         re.IGNORECASE
@@ -578,19 +601,24 @@ async def cmd_command(command: str, timeout: int = 60) -> str:
 
     # 创建常见命令结束标志的正则表达式
     completion_pattern = re.compile(
-        r'(?:[A-Za-z]:\\.*>$|C:>$|D:>$|E:>$)',
+        r'(?:[A-Za-z]:\\.*>$|[\\/][a-zA-Z0-9_\.\-]*>$)',
         re.MULTILINE
     )
 
-    # 创建OpenAI客户端
-    client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
+    # 只在有交互式提示时才创建OpenAI客户端
+    client = None
 
+    # 修改命令以设置UTF-8编码模式
+    utf8_command = "chcp 65001 && " + command
+
+    # 使用更好的进程创建设置
     proc = await asyncio.create_subprocess_exec(
-        "cmd.exe", "/C", command,
+        "cmd.exe", "/c", utf8_command,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        limit=1024 * 1024  # 1MB缓冲区
+        limit=1024 * 1024,  # 1MB缓冲区
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}
     )
 
     output = []
@@ -602,29 +630,59 @@ async def cmd_command(command: str, timeout: int = 60) -> str:
     
     max_console_output = 500  # 限制控制台输出的最大字符数
     current_output_length = 0
-    interaction_count = 0  # 跟踪交互次数
     
     # 命令执行状态
     command_activity = {
         "has_output": False,       # 是否有输出
         "last_chunk_time": time.time(),  # 最后一次收到输出的时间
-        "inactivity_threshold": 10,  # 无活动阈值（秒）
+        "inactivity_threshold": 5,  # 无活动阈值（秒）
         "command_completed": False,  # 命令是否已完成
-        "no_output_counter": 0,      # 连续无输出计数
-        "is_timeout": False,         # 是否已超时
-        "timeout_reason": ""         # 超时原因
     }
 
-    # 尝试多种编码的解码函数
+    # 使用增强版解码函数
     def try_decode(byte_data):
+        cache_key = hash(byte_data)
+        if hasattr(try_decode, 'cache') and cache_key in try_decode.cache:
+            return try_decode.cache[cache_key]
+            
+        # 优先尝试UTF-8和GBK编码
         encodings = ['utf-8', 'gbk', 'gb18030', 'cp936', system_encoding]
+        
+        # 先快速检查是否有编码问题标志
+        tmp_result = None
+        try:
+            tmp_result = byte_data.decode('utf-8', errors='replace')
+        except:
+            pass
+            
+        # 如果检测到可能的乱码字符，使用特殊处理
+        if tmp_result and any(pattern in tmp_result for pattern in ['å', 'ç', 'é', '™', 'è', 'æ', 'ÿ']):
+            try:
+                # 尝试双重转码修复
+                result = byte_data.decode('latin-1').encode('latin-1').decode('utf-8', errors='replace')
+                if not hasattr(try_decode, 'cache'):
+                    try_decode.cache = {}
+                try_decode.cache[cache_key] = result
+                return result
+            except:
+                pass
+        
         for encoding in encodings:
             try:
-                return byte_data.decode(encoding)
+                result = byte_data.decode(encoding)
+                if not hasattr(try_decode, 'cache'):
+                    try_decode.cache = {}
+                try_decode.cache[cache_key] = result
+                return result
             except UnicodeDecodeError:
                 continue
-        # 如果所有编码都失败，使用latin-1（不会失败但可能显示不正确）
-        return byte_data.decode('latin-1')
+                
+        # 如果所有编码都失败，使用替换模式的UTF-8
+        result = byte_data.decode('utf-8', errors='replace')
+        if not hasattr(try_decode, 'cache'):
+            try_decode.cache = {}
+        try_decode.cache[cache_key] = result
+        return result
 
     async def analyze_command_status(buffer_text):
         """使用LLM分析命令是否已完成执行"""
@@ -766,7 +824,7 @@ async def cmd_command(command: str, timeout: int = 60) -> str:
     
     async def watch_output(stream, is_stderr=False):
         """异步读取输出流，不限制控制台输出，实时显示所有内容"""
-        nonlocal buffer, current_output_length, context_buffer, interaction_count, last_output_time
+        nonlocal buffer, current_output_length, context_buffer, last_output_time
         
         # 定义一个计数器，用于跟踪连续空闲周期的数量
         idle_cycles = 0

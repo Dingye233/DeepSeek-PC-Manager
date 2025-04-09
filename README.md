@@ -1,3 +1,54 @@
+# DeepSeek AI 助手 
+
+
+## 安装说明
+
+1. 确保已安装Python 3.8或更高版本
+2. 安装依赖包：
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. 在`.env`文件中配置API密钥：
+   ```
+   api_key=your_api_key_here
+   ```
+
+## 使用方法
+
+1. 双击`启动gui.bat`运行程序
+2. 在输入框中输入消息，按回车或点击发送按钮
+3. 使用设置选项卡配置API密钥和其他选项
+4. 点击帮助选项卡查看使用说明
+5. 最小化窗口时，程序会显示为悬浮球
+6. 右键点击系统托盘图标可以显示/退出程序
+
+## 注意事项
+
+- 确保网络连接正常
+- API密钥需要正确配置
+- 建议定期查看任务摘要了解执行情况
+
+## 界面说明
+
+- **顶部状态栏**：显示Token计数、当前工具和时间
+- **聊天区域**：显示对话内容，支持Markdown格式
+- **输入框**：输入消息并发送
+- **设置选项卡**：配置API密钥和其他选项
+- **帮助选项卡**：查看使用说明
+- **任务摘要**：查看任务执行历史
+- **工具选择器**：快速切换不同的功能工具
+- **语音控制**：支持语音输入和输出（仅完整版本）
+- **系统托盘**：最小化时显示为悬浮球，支持快速操作
+- **主题切换**：支持深色/浅色主题切换
+- **字体设置**：可调整字体大小和样式
+- **快捷键提示**：显示当前可用的快捷键操作
+
+## 快捷键
+
+- Enter：发送消息
+- Ctrl+Q：退出程序
+- Ctrl+H：显示/隐藏窗口
+
 # DeepSeek-PC-Manager
 
 基于DeepSeek大语言模型的智能助手系统，提供多种功能，包括文本交互、语音识别与合成、代码生成、邮件管理、天气查询等。
@@ -86,6 +137,102 @@ DeepSeek-PC实现了一套严格的任务验证机制，确保用户请求被真
 - **天气查询**：获取城市实时天气信息 (`get_weather`)
 - **SSH控制**：管理远程服务器 (`ssh_controller.py`)
 - **深度思考**：使用R1优化器解决复杂问题 (`R1_opt`)
+- **Web搜索**：基于Bing搜索引擎的网页搜索和内容爬取功能 (`web_search_tool.py`)
+  - 支持关键词搜索和内容提取
+  - 智能筛选搜索结果
+  - 提取网页关键信息
+  - 专为AI agent优化的结构化数据输出
+
+### 代码增强工具套件【新增】
+
+本项目现已集成了强大的代码增强工具套件，包括代码搜索、编辑和审验功能，帮助AI代理更精确地理解、修改和验证代码。
+
+#### 工具概览
+
+##### 代码搜索工具
+
+这些工具是**新增**的，用于精确查找和定位代码：
+
+1. **search_code** - 智能搜索代码内容，支持多种搜索模式
+   ```python
+   # 语义搜索（默认）
+   search_code("example.py", "读取用户配置")
+   
+   # 函数搜索
+   search_code("example.py", "save_data", "function")
+   
+   # 正则表达式搜索
+   search_code("example.py", "def get_\\w+\\(", "regex")
+   ```
+
+2. **locate_code_section** - 定位代码文件中的指定行范围
+   ```python
+   # 定位第10-20行代码
+   locate_code_section("example.py", 10, 20)
+   ```
+
+3. **get_code_context** - 获取代码行的上下文环境
+   ```python
+   # 获取第15行周围5行的上下文
+   get_code_context("example.py", 15, 5)
+   ```
+
+##### 代码编辑工具【增强】
+
+这些是已有工具，现已**增强**功能：
+
+1. **write_code** - 增强版的代码文件写入工具
+   - 代码质量自动验证
+   - 潜在问题警告
+   - 代码结构分析
+   - 自动备份功能
+
+2. **verify_code** - 增强版的代码验证工具
+   - 全面的语法检查
+   - 逻辑问题分析
+   - 未使用导入/变量检测
+   - 潜在无限循环检测
+   - 代码质量评分
+
+3. **append_code** - 增强版的代码追加工具
+   - 追加后的完整性检查
+   - 自动备份功能
+   - 代码结构验证
+
+4. **read_code** - 增强版的代码读取工具
+   - 代码复杂度分析
+   - 函数和类统计
+   - 代码质量指标
+   - 潜在问题识别
+
+5. **create_module** - 增强版的模块创建工具
+   - 依赖模块可用性检查
+   - 代码质量评估
+   - 更完善的模块结构生成
+
+#### 工具协作流程
+
+##### 代码定位与修改流程
+
+1. 使用`search_code`查找需要修改的代码
+2. 使用`locate_code_section`获取精确位置
+3. 使用`read_code`查看完整代码
+4. 使用`write_code`或`append_code`修改代码
+5. 使用`verify_code`验证修改是否正确
+
+#### 最佳实践
+
+1. **搜索 -> 定位 -> 编辑**：使用搜索工具找到相关代码，再精确定位，最后编辑
+2. **先验证后写入**：在写入或修改代码前，先使用`verify_code`验证代码是否有问题
+3. **利用上下文**：使用`get_code_context`了解代码的上下文环境，更准确地修改代码
+4. **关注代码质量**：注意查看工具返回的代码质量评分和改进建议
+
+#### 应用场景
+
+1. **代码修改**：先搜索需要修改的函数，获取定位，然后进行精确修改
+2. **bug修复**：定位错误发生的代码行，获取上下文，理解问题并修复
+3. **代码理解**：快速搜索和理解大型代码库中的功能实现
+4. **代码重构**：查找相似结构，实现代码重构
 
 ---
 
@@ -132,41 +279,78 @@ python aaaa.py
 
 ### 可用工具
 
-1. **write_code** - 将代码写入文件
+1. **write_code【增强版】** - 将代码写入文件并进行自动验证
    ```python
    {
      "file_name": "example.py",  # 文件路径和名称
-     "code": "print('Hello World')"  # 代码内容
+     "code": "print('Hello World')",  # 代码内容
+     "with_analysis": true,  # 可选，是否返回代码分析结果
+     "create_backup": true  # 可选，是否创建备份
    }
    ```
 
-2. **verify_code** - 验证Python代码语法
+2. **verify_code【增强版】** - 全面验证Python代码
    ```python
    {
-     "code": "def example(): return 42"  # 要验证的Python代码
+     "code": "def example(): return 42",  # 要验证的Python代码
+     "verbose": true,  # 可选，是否返回详细验证结果
+     "check_best_practices": true  # 可选，是否检查最佳实践
    }
    ```
 
-3. **append_code** - 向文件追加代码
+3. **append_code【增强版】** - 向文件追加代码并验证完整性
    ```python
    {
      "file_name": "example.py",  # 要追加的文件
-     "content": "\ndef new_function():\n    pass"  # 要追加的内容
+     "content": "\ndef new_function():\n    pass",  # 要追加的内容
+     "verify_after": true,  # 可选，追加后是否验证
+     "create_backup": true  # 可选，是否创建备份
    }
    ```
 
-4. **read_code** - 读取文件内容
+4. **read_code【增强版】** - 读取文件内容并提供深度分析
    ```python
    {
-     "file_name": "example.py"  # 要读取的文件
+     "file_name": "example.py",  # 要读取的文件
+     "with_analysis": true,  # 可选，是否返回代码分析
+     "complexity_check": true  # 可选，是否分析代码复杂度
    }
    ```
 
-5. **create_module** - 创建Python模块
+5. **create_module【增强版】** - 创建Python模块并验证其有效性
    ```python
    {
      "module_name": "utils",  # 模块名称（不含.py）
-     "functions_json": '[{"name": "add", "params": "a, b", "body": "return a + b", "docstring": "Add two numbers"}]'  # 函数定义JSON
+     "functions_json": '[{"name": "add", "params": "a, b", "body": "return a + b", "docstring": "Add two numbers"}]',  # 函数定义JSON
+     "verify_imports": true,  # 可选，是否验证导入
+     "create_tests": true  # 可选，是否创建测试代码
+   }
+   ```
+
+6. **search_code【新增】** - 智能搜索代码内容
+   ```python
+   {
+     "file_name": "example.py",  # 要搜索的文件
+     "query": "用户验证函数",  # 搜索查询
+     "search_type": "semantic"  # 可选，搜索类型：semantic(默认)、exact、regex、function、class
+   }
+   ```
+
+7. **locate_code_section【新增】** - 定位代码文件中的指定行范围
+   ```python
+   {
+     "file_name": "example.py",  # 目标文件
+     "start_line": 10,  # 起始行
+     "end_line": 20  # 结束行
+   }
+   ```
+
+8. **get_code_context【新增】** - 获取代码行的上下文环境
+   ```python
+   {
+     "file_name": "example.py",  # 目标文件
+     "line_number": 15,  # 目标行号
+     "context_lines": 5  # 可选，上下文行数（默认为5）
    }
    ```
 

@@ -20,6 +20,13 @@ from error_utils import parse_error_message, task_error_analysis
 from message_utils import num_tokens_from_messages, clean_message_history, clear_context, clean_message_history_with_llm
 from console_utils import print_color, print_success, print_error, print_warning, print_info, print_highlight
 from system_utils import powershell_command, cmd_command
+# 导入代码搜索工具函数
+from code_search_tools import search_code, locate_code_section, get_code_context
+# 导入增强版工具, 但只用于内部实现，不注册为独立工具
+from code_edit_enhanced import edit_code_section, edit_function, edit_code_by_pattern, insert_code
+from code_validator_enhanced import validate_python_code, verify_imports, execute_code_safely, check_complexity
+# 导入Web搜索工具
+from web_search_tool import web_search, fetch_webpage, filter_search_results
 import concurrent.futures
 import sys  # 添加sys模块导入
 import time  # 添加time模块导入
@@ -77,72 +84,62 @@ task_planning_system_message = {
 
 async def execute_unified_task(user_input, messages_history):
     """
-    统一的任务执行流程，结合了复杂任务规划和简单任务执行的优点
+    统一任务执行函数 - 处理复杂和简单任务
     """
-    # 检查用户输入是否为简单对话
-    simple_chat_patterns = [
-        r'^(好的?|是的?|嗯+|对的?|没错|可以的?|当然|行|OK|好嘞|好啊|嗯哼|那?就?好|没问题)$',
-        r'^(不用了?|不需要|不用谢|谢谢|感谢|多谢|不客气)$',
-        r'^(再见|拜拜|回头见|下次见|晚安|早安|午安)$',
-        r'^(你好|早上好|下午好|晚上好|Hello|Hi|Hey|哈喽)$'
-    ]
+    global client, task_summary
     
-    for pattern in simple_chat_patterns:
-        if re.match(pattern, user_input.strip(), re.IGNORECASE):
-            print_info("检测到简单对话，不启动任务系统")
-            simple_response = "好的，有什么我能帮你的请随时告诉我。"
-            if "谢谢" in user_input or "感谢" in user_input:
-                simple_response = "不客气，很高兴能帮到你！"
-            elif "再见" in user_input or "拜拜" in user_input:
-                simple_response = "再见！有需要随时找我。"
-            elif "你好" in user_input or "早上好" in user_input or "下午好" in user_input or "晚上好" in user_input:
-                simple_response = f"{user_input}！有什么我可以帮你的吗？"
-                
-            # 直接添加到消息历史而不启动任务系统
-            messages_history.append({"role": "user", "content": user_input})
-            messages_history.append({"role": "assistant", "content": simple_response})
-            return simple_response
+    # 初始化任务摘要
+    task_summary = {
+        "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "user_input": user_input,
+        "current_tools": [],
+        "status_updates": [],
+        "complete": False
+    }
     
-    # 初始化任务环境
+    # 添加用户输入到消息历史
     planning_messages = messages_history.copy()
     planning_messages.append({"role": "user", "content": user_input})
     
-    print_info("\n===== 开始执行任务 =====")
-    print_info(f"用户请求: {user_input}")
-    print_info("=======================\n")
+    # 发送token计数信号
+    token_count = num_tokens_from_messages(planning_messages)
+    if hasattr(messages_history, 'token_signal'):
+        messages_history.token_signal.emit(token_count)
     
-    # 检测是否为简单任务（如git操作），可以直接执行而无需复杂验证
-    simple_task_patterns = [
-        (r'git\s+(add|commit|push|pull|clone|status|checkout|branch|merge|rebase|fetch)', 2),  # git操作，较少验证
-        (r'(ls|dir)\s+', 1),  # 列出文件，最少验证
-        (r'cd\s+', 1),  # 切换目录，最少验证
-        (r'(cat|type)\s+', 1),  # 查看文件内容，最少验证
-        (r'(mkdir|md)\s+', 1),  # 创建目录，最少验证
-        (r'(rm|del|rmdir|rd)\s+', 3),  # 删除操作，较多验证
-        (r'(cp|copy|mv|move)\s+', 2),  # 复制移动，较少验证
-        (r'(ping|ipconfig|ifconfig)\s*', 1),  # 网络命令，最少验证
-        (r'echo\s+', 1),  # 回显，最少验证
-    ]
-    
-    # 确定任务复杂度级别
-    task_complexity = 4  # 默认复杂度（需要完整验证）
-    for pattern, complexity in simple_task_patterns:
-        if re.search(pattern, user_input.lower()):
-            task_complexity = complexity
-            print_info(f"检测到简单任务类型，复杂度级别: {complexity}/4")
-            break
-    
-    # 根据任务复杂度调整验证频率和深度
-    max_recursive_verify = 15
-    if task_complexity == 1:
-        max_recursive_verify = 2  # 最简单任务最多2次验证
-    elif task_complexity == 2:
-        max_recursive_verify = 4  # 较简单任务最多4次验证
-    elif task_complexity == 3:
-        max_recursive_verify = 8  # 中等复杂任务最多8次验证
+    # 更新任务摘要
+    def update_task_summary(tool_name=None, status=None, progress=None):
+        """更新任务摘要并返回格式化文本"""
+        if tool_name:
+            task_summary["current_tools"].append(tool_name)
+        if status:
+            task_summary["status_updates"].append(status)
+        if progress:
+            task_summary["progress"] = progress
+            
+        summary_text = f"""==== 任务摘要 ====
+任务: {task_summary['user_input']}
+开始时间: {task_summary['start_time']}
+进度: {task_summary.get('progress', 0)}%
+
+已执行工具:
+{chr(10).join(f'- {tool}' for tool in task_summary['current_tools'])}
+
+状态更新:
+{chr(10).join(f'- {status}' for status in task_summary['status_updates'])}
+=======================
+"""
+        # 发送任务摘要信号
+        if hasattr(messages_history, 'summary_signal'):
+            messages_history.summary_signal.emit(summary_text)
+        
+        return summary_text
     
     # 检查token数量并优化清理流程
     token_count = num_tokens_from_messages(planning_messages)
+    # 更新token计数信号
+    if hasattr(messages_history, 'token_signal'):
+        messages_history.token_signal.emit(token_count)
+        
     if token_count > 28000:  # 提前清理，避免接近限制
         # 使用简单的消息清理而不是LLM清理，减少额外LLM调用
         if token_count > 35000:
@@ -150,6 +147,11 @@ async def execute_unified_task(user_input, messages_history):
         else:
             # 仅在token数量中等时使用LLM清理
             planning_messages = await clean_message_history_with_llm(planning_messages, client, 25000)
+        
+        # 清理后更新token计数
+        token_count = num_tokens_from_messages(planning_messages)
+        if hasattr(messages_history, 'token_signal'):
+            messages_history.token_signal.emit(token_count)
     
     # 使用更简化的任务执行指导
     task_guidance = """
@@ -157,20 +159,15 @@ async def execute_unified_task(user_input, messages_history):
     注意：所有操作必须通过工具执行，每次一个操作，等待结果后再继续。处理多个文件、复杂分析或批量任务时，使用Python脚本而非命令行工具。
     """
     
-    if task_complexity <= 2:
-        # 对于简单任务使用更精简的指导
-        planning_messages.append({"role": "user", "content": task_guidance})
-    else:
-        # 对于复杂任务使用详细指导
-        planning_messages.append({"role": "user", "content": task_guidance + """
-        对于数据处理、文件操作和批量任务，必须使用Python脚本而非PowerShell或CMD命令。
-        在以下情况下必须编写Python脚本：处理多个文件（超过5个）、处理大量数据（超过1MB）、
-        需要进行复杂数据分析、需要处理多种文件格式、需要执行批量操作、需要对文件内容进行解析。
-        只有在执行非常简单的单一操作时才考虑使用PowerShell或CMD命令。
-        """})
+    planning_messages.append({"role": "user", "content": task_guidance + """
+    对于数据处理、文件操作和批量任务，必须使用Python脚本而非PowerShell或CMD命令。
+    在以下情况下必须编写Python脚本：处理多个文件（超过5个）、处理大量数据（超过1MB）、
+    需要进行复杂数据分析、需要处理多种文件格式、需要执行批量操作、需要对文件内容进行解析。
+    只有在执行非常简单的单一操作时才考虑使用PowerShell或CMD命令。
+    """})
     
     # 任务执行循环
-    max_iterations = max(max_recursive_verify, 20)  # 取两者较大值作为最大迭代次数
+    max_iterations = 20  # 固定最大迭代次数
     iteration = 1
     is_task_complete = False
     task_failed = False
@@ -180,21 +177,27 @@ async def execute_unified_task(user_input, messages_history):
         
         # 如果token数量过大，清理历史消息
         token_count = num_tokens_from_messages(planning_messages)
+        # 更新token计数信号
+        if hasattr(messages_history, 'token_signal'):
+            messages_history.token_signal.emit(token_count)
+        
         if token_count > 28000:  # 提前清理，避免接近限制
             print_warning("Token数量超过预警阈值，清理消息历史...")
             planning_messages = clean_message_history(planning_messages, 25000)  # 使用简单清理而不是LLM清理
+            
+            # 清理后更新token计数
+            token_count = num_tokens_from_messages(planning_messages)
+            if hasattr(messages_history, 'token_signal'):
+                messages_history.token_signal.emit(token_count)
         
         # 调用API，执行任务步骤
         try:
-            # 根据任务复杂度调整温度
-            temperature = 0.2 if task_complexity <= 2 else 0.3
-            
             response = client.chat.completions.create(
                 model="deepseek-chat",
                 messages=planning_messages,
                 tools=tools,
                 tool_choice="auto",
-                temperature=temperature
+                temperature=0.3
             )
             
             message_data = response.choices[0].message
@@ -203,125 +206,205 @@ async def execute_unified_task(user_input, messages_history):
             if hasattr(message_data, 'tool_calls') and message_data.tool_calls:
                 tool_calls = message_data.tool_calls
                 
-                # 添加助手消息和工具调用到历史
-                planning_messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments
-                            }
-                        } for tc in tool_calls
-                    ]
-                })
+                # 将模型的思考和工具调用请求添加到规划消息中
+                planning_messages.append(message_data)
                 
-                # 执行每个工具调用
+                # 处理每个工具调用
                 for tool_call in tool_calls:
-                    func_name = tool_call.function.name
-                    args = json.loads(tool_call.function.arguments)
-                    print_info(f"\n正在执行工具: {func_name}")
-                    print_info(f"参数: {args}")
+                    tool_name = tool_call.function.name
+                    tool_arguments = json.loads(tool_call.function.arguments)
                     
                     try:
-                        # 针对不同工具优化执行
-                        if func_name == "get_current_time":
-                            result = get_current_time(args.get("timezone", "UTC"))
-                        elif func_name == "get_weather":
-                            result = get_weather(args["city"])
-                        elif func_name == "powershell_command":
-                            # 根据复杂度调整超时时间
-                            timeout = args.get("timeout", 30 if task_complexity <= 2 else 60)
-                            result = await powershell_command(args["command"], timeout)
-                        elif func_name == "cmd_command":
-                            # 根据复杂度调整超时时间
-                            timeout = args.get("timeout", 30 if task_complexity <= 2 else 60)
-                            result = await cmd_command(args["command"], timeout)
-                        elif func_name == "email_check":
-                            result = get_email.retrieve_emails()
-                        elif func_name == "email_details":
-                            result = get_email.get_email_details(args["email_id"])
-                        elif func_name == "encoding":
-                            result = python_tools.encoding(args["encoding"], args["file_name"])
-                        elif func_name == "send_mail":
-                            # 处理附件参数
-                            attachments = None
-                            if "attachments" in args and args["attachments"]:
-                                attachments_input = args["attachments"]
-                                # 如果是逗号分隔的多个文件，分割成列表
-                                if isinstance(attachments_input, str) and "," in attachments_input:
-                                    # 分割字符串并去除每个路径两边的空格
-                                    attachments = [path.strip() for path in attachments_input.split(",")]
-                                else:
-                                    attachments = attachments_input
-                            
-                            result = send_email.main(args["text"], args["receiver"], args["subject"], attachments)
-                        elif func_name == "R1_opt":
-                            result = R1(args["message"])
-                            print_warning(f"已使用R1深度思考工具，当前迭代: {iteration}/{max_iterations}")
-                        elif func_name == "ssh":
-                            ip = "192.168.10.107"
-                            username = "ye"
-                            password = "147258"
-                            result = ssh_controller.ssh_interactive_command(ip, username, password, args["command"])
-                        elif func_name == "clear_context":
-                            messages = clear_context(messages)  # 更新全局消息历史
-                            planning_messages = clear_context(planning_messages)  # 更新当前执行消息
-                            result = "上下文已清除"
-                            is_task_complete = True  # 标记任务完成
-                        elif func_name == "write_code":
-                            result = code_tools.write_code(args["file_name"], args["code"])
-                        elif func_name == "verify_code":
-                            result = code_tools.verify_code(args["code"])
-                        elif func_name == "append_code":
-                            result = code_tools.append_code(args["file_name"], args["content"])
-                        elif func_name == "read_code":
-                            result = code_tools.read_code(args["file_name"])
-                        elif func_name == "create_module":
-                            result = code_tools.create_module(args["module_name"], args["functions_json"])
-                        elif func_name == "user_input":
-                            # 新增工具: 请求用户输入
-                            prompt = args.get("prompt", "请提供更多信息：")
-                            timeout = args.get("timeout", 60)
-                            user_input_data = await get_user_input_async(prompt, timeout)
-                            result = f"用户输入: {user_input_data}" if user_input_data else "用户未提供输入（超时）"
-                        elif func_name == "read_file":
-                            result = file_reader.read_file(args["file_path"], args["encoding"], args["extract_text_only"])
-                        elif func_name == "list_directory" or func_name == "list_dir":
-                            # 处理已废弃的工具
-                            error_message = f"工具 '{func_name}' 已被废弃，请使用 'powershell_command' 工具执行 'Get-ChildItem' 命令或 'cmd_command' 工具执行 'dir' 命令来列出目录内容。"
-                            print_warning(error_message)
-                            result = error_message
-                        else:
-                            raise ValueError(f"未定义的工具调用: {func_name}")
+                        # 更新任务摘要
+                        update_task_summary(tool_name=tool_name)
                         
-                        print_success(f"工具执行结果: {result}")
+                        if tool_name == "clear_context":
+                            tool_result = clear_context()
+                            planning_messages = [messages_history[0]]  # 保留系统消息
+                            planning_messages.append({"role": "user", "content": user_input})
+                            
+                        elif tool_name == "user_input":
+                            prompt = tool_arguments.get("prompt", "请提供更多信息")
+                            timeout = tool_arguments.get("timeout", 60)
+                            tool_result = await get_user_input_async(prompt, timeout)
+                            
+                        elif tool_name == "get_current_time":
+                            timezone = tool_arguments.get("timezone", "local")
+                            tool_result = get_current_time(timezone)
+                        
+                        elif tool_name == "get_weather":
+                            city = tool_arguments.get("city", "")
+                            tool_result = get_weather(city)
+                            
+                        elif tool_name == "powershell_command":
+                            command = tool_arguments.get("command", "")
+                            timeout = tool_arguments.get("timeout", 60)
+                            tool_result = powershell_command(command, timeout)
+                            
+                        elif tool_name == "cmd_command":
+                            command = tool_arguments.get("command", "")
+                            timeout = tool_arguments.get("timeout", 60)
+                            tool_result = cmd_command(command, timeout)
+                            
+                        elif tool_name == "get_emails":
+                            limit = tool_arguments.get("limit", 10)
+                            folder = tool_arguments.get("folder", "INBOX")
+                            tool_result = get_email.get_emails(limit, folder)
+                            
+                        elif tool_name == "get_email_detail":
+                            email_id = tool_arguments.get("email_id", "")
+                            tool_result = get_email.get_email_detail(email_id)
+                            
+                        elif tool_name == "send_mail":
+                            receiver = tool_arguments.get("receiver", "")
+                            subject = tool_arguments.get("subject", "")
+                            text = tool_arguments.get("text", "")
+                            attachments = tool_arguments.get("attachments", "")
+                            tool_result = send_email.send_mail(receiver, subject, text, attachments)
+                            
+                        elif tool_name == "R1_opt":
+                            message = tool_arguments.get("message", "")
+                            tool_result = R1(message)
+                            
+                        elif tool_name == "ssh":
+                            command = tool_arguments.get("command", "")
+                            tool_result = ssh_controller.execute(command)
+                            
+                        elif tool_name == "write_code":
+                            file_name = tool_arguments.get("file_name", "")
+                            code = tool_arguments.get("code", "")
+                            with_analysis = tool_arguments.get("with_analysis", False)
+                            create_backup = tool_arguments.get("create_backup", True)
+                            tool_result = code_tools.write_code(file_name, code, with_analysis, create_backup)
+                            
+                        elif tool_name == "verify_code":
+                            code = tool_arguments.get("code", "")
+                            verbose = tool_arguments.get("verbose", False)
+                            check_best_practices = tool_arguments.get("check_best_practices", False)
+                            tool_result = code_tools.verify_code(code, verbose, check_best_practices)
+                            
+                        elif tool_name == "append_code":
+                            file_name = tool_arguments.get("file_name", "")
+                            content = tool_arguments.get("content", "")
+                            verify_after = tool_arguments.get("verify_after", False)
+                            create_backup = tool_arguments.get("create_backup", True)
+                            tool_result = code_tools.append_code(file_name, content, verify_after, create_backup)
+                            
+                        elif tool_name == "read_code":
+                            file_name = tool_arguments.get("file_name", "")
+                            with_analysis = tool_arguments.get("with_analysis", True)
+                            complexity_check = tool_arguments.get("complexity_check", False)
+                            tool_result = code_tools.read_code(file_name, with_analysis, complexity_check)
+                            
+                        elif tool_name == "read_file":
+                            file_path = tool_arguments.get("file_path", "")
+                            max_size = tool_arguments.get("max_size", 1024*1024*10)  # 默认10MB
+                            encoding = tool_arguments.get("encoding", "utf-8")
+                            tool_result = json.dumps(file_reader.read_file(file_path, max_size, encoding))
+                            
+                        elif tool_name == "create_module":
+                            module_name = tool_arguments.get("module_name", "")
+                            functions_json = tool_arguments.get("functions_json", "[]")
+                            verify_imports = tool_arguments.get("verify_imports", False)
+                            create_tests = tool_arguments.get("create_tests", False)
+                            tool_result = code_tools.create_module(module_name, functions_json, verify_imports, create_tests)
+                            
+                        # 代码搜索工具
+                        elif tool_name == "search_code":
+                            file_path = tool_arguments.get("file_path", "")
+                            query = tool_arguments.get("query", "")
+                            search_type = tool_arguments.get("search_type", "semantic")
+                            tool_result = search_code(file_path, query, search_type)
+                            
+                        elif tool_name == "locate_code_section":
+                            file_path = tool_arguments.get("file_path", "")
+                            start_line = tool_arguments.get("start_line", 1)
+                            end_line = tool_arguments.get("end_line", 10)
+                            tool_result = locate_code_section(file_path, start_line, end_line)
+                            
+                        elif tool_name == "get_code_context":
+                            file_path = tool_arguments.get("file_path", "")
+                            line_number = tool_arguments.get("line_number", 1)
+                            context_lines = tool_arguments.get("context_lines", 5)
+                            tool_result = get_code_context(file_path, line_number, context_lines)
+                        
+                        # Web搜索工具
+                        elif tool_name == "web_search":
+                            query = tool_arguments.get("query", "")
+                            num_results = tool_arguments.get("num_results", 5)
+                            filter_adult = tool_arguments.get("filter_adult", True)
+                            keywords = tool_arguments.get("keywords", None)
+                            sort_by_relevance = tool_arguments.get("sort_by_relevance", True)
+                            match_all_keywords = tool_arguments.get("match_all_keywords", False)
+                            tool_result = json.dumps(web_search(query, num_results, filter_adult, keywords, sort_by_relevance, match_all_keywords), ensure_ascii=False)
+                            
+                        elif tool_name == "fetch_webpage":
+                            url = tool_arguments.get("url", "")
+                            extract_keywords = tool_arguments.get("extract_keywords", None)
+                            tool_result = json.dumps(fetch_webpage(url, extract_keywords), ensure_ascii=False)
+                            
+                        elif tool_name == "filter_search_results":
+                            results = tool_arguments.get("results", [])
+                            keywords = tool_arguments.get("keywords", [])
+                            match_all = tool_arguments.get("match_all", False)
+                            tool_result = json.dumps(filter_search_results(results, keywords, match_all), ensure_ascii=False)
+                        
+                        # 移除重复的增强工具调用处理代码，这些功能已经集成到原始工具中
+                        # 原始工具的内部实现现在使用增强版功能
+                        
+                        else:
+                            tool_result = f"未知工具: {tool_name}"
+                            
+                        # 检查任务结果中是否包含完成标记
+                        if isinstance(tool_result, str) and "[任务已完成]" in tool_result:
+                            is_task_complete = True
+                        
+                        print_success(f"工具执行结果: {tool_result}")
+                        
+                        # 更新任务摘要
+                        summary_text = update_task_summary(
+                            status=f"工具 {tool_name} 执行成功: {str(tool_result)[:100]}...",
+                            progress=min(100, int((iteration / max_iterations) * 100))
+                        )
+                        print_info(summary_text)
+                        
+                        # 发送工具输出信号
+                        if hasattr(messages_history, 'tool_output_signal'):
+                            messages_history.tool_output_signal.emit(str(tool_result))
                         
                         # 添加工具执行结果到历史
                         planning_messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
-                            "content": str(result)
+                            "content": str(tool_result)
                         })
                         
-                        # 针对简单任务优化：如果是复杂度为1的简单任务且工具执行结果中有成功信号
-                        if task_complexity == 1 and ("成功" in str(result) or "完成" in str(result)) and not ("错误" in str(result) or "失败" in str(result)):
-                            if iteration >= 2:  # 至少执行两次迭代
-                                print_info("\n检测到简单任务已执行成功，将在评估后决定是否完成")
-                        
                     except Exception as e:
-                        error_msg = f"工具执行失败: {str(e)}"
-                        print_error(f"\n工具执行错误: {error_msg}")
+                        error_msg = f"工具执行错误: {str(e)}"
+                        print_error(error_msg)
+                        
+                        # 记录详细错误信息
+                        error_analysis = task_error_analysis(e)
+                        
+                        # 更新任务摘要
+                        summary_text = update_task_summary(
+                            status=f"工具 {tool_name} 执行失败: {error_msg}",
+                            progress=min(100, int((iteration / max_iterations) * 100))
+                        )
                         
                         # 添加错误信息到历史
                         planning_messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
-                            "content": error_msg
+                            "content": f"工具执行失败: {error_msg}\n\n详细错误: {error_analysis}"
                         })
+                        
+                        # 如果是关键错误，标记任务失败
+                        if "FileNotFoundError" in str(e) or "PermissionError" in str(e):
+                            task_failed = True
+                        
+                    # 清理线程池以防止资源泄露
+                    cleanup_thread_pools()
                 
                 # 工具执行后，要求模型评估任务状态
                 assessment_prompt = """
@@ -356,6 +439,13 @@ async def execute_unified_task(user_input, messages_history):
                 print(assessment_result)
                 print_info("=========================\n")
                 
+                # 更新任务摘要
+                summary_text = update_task_summary(
+                    status=f"任务状态评估: {assessment_result}",
+                    progress=min(100, int((iteration / max_iterations) * 100))
+                )
+                print_info(summary_text)
+                
                 # 检查任务是否已完成
                 if "[任务已完成]" in assessment_result:
                     print_success("\n✅ 任务完成!")
@@ -380,6 +470,13 @@ async def execute_unified_task(user_input, messages_history):
                     
                     print_success(f"任务结果: {summary}")
                     
+                    # 更新任务摘要
+                    summary_text = update_task_summary(
+                        status=f"任务完成: {summary}",
+                        progress=100
+                    )
+                    print_success(summary_text)
+                    
                     # 更新主对话消息
                     messages_history.append({"role": "user", "content": user_input})
                     messages_history.append({"role": "assistant", "content": summary})
@@ -392,82 +489,32 @@ async def execute_unified_task(user_input, messages_history):
                 elif "[任务失败]" in assessment_result:
                     # 询问用户是否继续尝试
                     try:
-                        # 修复：确保异步执行正确
                         print_info("\n正在等待用户决策...")
-                        user_choice = await ask_user_to_continue(planning_messages)
+                        error_failed_tools = []
+                        for tool_info in tool_calls:
+                            execution_successful = getattr(tool_info, "execution_successful", True)
+                            if not execution_successful:
+                                error_failed_tools.append(getattr(tool_info, "name", "未知工具"))
                         
-                        # 检查用户选择
-                        if user_choice is None or user_choice == "":
-                            # 超时或空输入情况，默认继续执行
-                            print_info("\n用户未提供明确输入，系统默认继续尝试")
-                            
-                            # 添加系统默认决策到对话
-                            planning_messages.append({
-                                "role": "user", 
-                                "content": "用户未提供明确输入，系统默认继续尝试。请采用全新思路寻找解决方案。"
-                            })
-                            
-                            # 重置迭代计数
-                            iteration = max(1, iteration - 3)  # 减少一些迭代次数，给予更多尝试机会
-                            print_info(f"\n重置迭代计数至 {iteration}")
-                            
-                            # 主动清理线程池，防止卡住
-                            cleanup_thread_pools()
-                        elif user_choice.lower() in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
-                            # 用户确认终止
-                            print_warning("\n用户选择终止任务。")
-                            
-                            # 提取失败原因
-                            failure_start = assessment_result.find("[任务失败]") + len("[任务失败]")
-                            failure_reason = assessment_result[failure_start:].strip()
-                            
-                            # 更新主对话消息
-                            messages_history.append({"role": "user", "content": user_input})
-                            messages_history.append({"role": "assistant", "content": f"任务执行失败: {failure_reason}"})
-                            
-                            # 主动清理线程池
-                            cleanup_thread_pools()
-                            
-                            return f"任务执行失败: {failure_reason}"
-                        else:
-                            # 用户提供了其他建议
-                            print_info(f"\n用户输入: {user_choice}")
-                            
-                            # 添加用户反馈到对话
-                            planning_messages.append({
-                                "role": "user", 
-                                "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
-                            })
-                            
-                            # 重置迭代计数，相当于给予全新的尝试机会
-                            iteration = 1
-                            print_info("\n⚠️ 用户选择继续尝试，迭代计数已重置！")
-                            continue  # 继续执行任务
+                        # 更新任务摘要
+                        error_message = f"工具执行失败: {', '.join(error_failed_tools)}"
+                        update_task_summary(status=f"任务执行出现错误，无法继续: {', '.join(error_failed_tools)}")
+                        
+                        # 向用户询问是否继续尝试，即使有错误
+                        user_choice = await ask_user_to_continue(planning_messages, is_direct_tool_call=False, error_message=error_message)
+                        if user_choice == "终止":
+                            task_failed = True
+                            break
                     except Exception as e:
-                        # 获取用户输入异常时的处理
                         print_warning(f"获取用户输入异常: {str(e)}，默认继续尝试")
                         
-                        # 添加系统默认决策到对话
                         planning_messages.append({
                             "role": "user", 
                             "content": f"获取用户输入失败: {str(e)}，系统默认继续尝试。请采用全新思路寻找解决方案。"
                         })
                         
-                        # 主动清理线程池以防止资源泄露
                         cleanup_thread_pools()
-                
-                # 如果任务需要继续执行，添加执行提示
-                execute_prompt = """
-                请根据当前的任务进展，直接执行下一步操作：
-                1. 不要解释你将要做什么，直接调用必要的工具
-                2. 只执行一个具体步骤，等待结果后再确定下一步
-                3. 专注于解决问题，而不是机械地按原计划执行
-                
-                记住：必须使用工具来执行实际操作，而不是仅描述你要做什么
-                """
-                
-                planning_messages.append({"role": "user", "content": execute_prompt})
-                
+            
             else:
                 # 如果模型没有调用工具，提醒它必须使用工具
                 content = message_data.content
@@ -481,7 +528,6 @@ async def execute_unified_task(user_input, messages_history):
                     print_success("\n✅ 助手表示任务已完成")
                     is_task_complete = True
                     
-                    # 添加到主对话消息
                     messages_history.append({"role": "user", "content": user_input})
                     messages_history.append({"role": "assistant", "content": content})
                     
@@ -503,20 +549,24 @@ async def execute_unified_task(user_input, messages_history):
             print_error(error_msg)
             print_error("===================\n")
             
-            # 添加错误信息到消息历史
+            # 更新任务摘要
+            summary_text = update_task_summary(
+                status=f"执行错误: {error_msg}",
+                progress=min(100, int((iteration / max_iterations) * 100))
+            )
+            print_error(summary_text)
+            
             planning_messages.append({
                 "role": "user", 
                 "content": f"执行过程中发生错误: {error_msg}。请调整策略，尝试其他方法继续执行任务。"
             })
         
-        # 增加迭代计数
         iteration += 1
     
     # 如果达到最大迭代次数仍未完成任务
     if not is_task_complete:
         print_warning(f"\n⚠️ 已达到最大迭代次数({max_iterations})，但任务仍未完成")
         
-        # 生成最终总结
         summary_prompt = "尽管执行了多次操作，但任务似乎未能完全完成。请总结当前状态和已完成的步骤。"
         planning_messages.append({"role": "user", "content": summary_prompt})
         
@@ -529,7 +579,13 @@ async def execute_unified_task(user_input, messages_history):
         
         summary = summary_response.choices[0].message.content
         
-        # 更新主对话消息
+        # 更新任务摘要
+        summary_text = update_task_summary(
+            status=f"任务未完成: {summary}",
+            progress=100
+        )
+        print_warning(summary_text)
+        
         messages_history.append({"role": "user", "content": user_input})
         messages_history.append({"role": "assistant", "content": summary})
         
