@@ -1,0 +1,15 @@
+ 
+[2025-04-08 16:41:28] 程序启动错误: name 'icon' is not defined
+[2025-04-08 16:41:49] 程序启动错误: name 'icon' is not defined
+[2025-04-08 16:47:34] 程序启动错误: name 'icon' is not defined
+[2025-04-08 17:27:45] 程序启动错误: addWidget(self, QWidget, stretch: int = 0, alignment: Qt.AlignmentFlag = Qt.Alignment()): argument 1 has unexpected type 'QHBoxLayout'
+[2025-04-08 17:28:48] 程序启动错误: addWidget(self, QWidget, stretch: int = 0, alignment: Qt.AlignmentFlag = Qt.Alignment()): argument 1 has unexpected type 'QHBoxLayout'
+[2025-04-08 17:28:56] 程序启动错误: addWidget(self, QWidget, stretch: int = 0, alignment: Qt.AlignmentFlag = Qt.Alignment()): argument 1 has unexpected type 'QHBoxLayout'
+[2025-04-08 17:29:32] 程序启动错误: addWidget(self, QWidget, stretch: int = 0, alignment: Qt.AlignmentFlag = Qt.Alignment()): argument 1 has unexpected type 'QHBoxLayout'
+[2025-04-08 17:31:27] 程序启动错误: addWidget(self, QWidget, stretch: int = 0, alignment: Qt.AlignmentFlag = Qt.Alignment()): argument 1 has unexpected type 'QHBoxLayout'
+
+[2025-04-09 14:17:17] 运行错误: type object 'APIBridge' has no attribute 'set_tool_output_callback'
+
+[2025-04-09 14:23:32] 运行错误: type object 'APIBridge' has no attribute 'get_token_count'
+
+[2025-04-09 14:23:32] 运行错误: type object 'APIBridge' has no attribute 'get_token_count'

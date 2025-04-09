@@ -7,6 +7,7 @@ import markdown
 from datetime import datetime
 import warnings
 import re
+import math
 
 # 添加忽略特定Qt警告的功能
 class QtWarningFilter:
@@ -38,8 +39,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QAction, QFileDialog, QMessageBox, QFrame,
                            QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                            QSplitter, QDialog, QProgressBar, QDialogButtonBox,
-                           QListWidgetItem, QListWidget)
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QPropertyAnimation, QEasingCurve, QMetaObject, QDateTime
+                           QListWidgetItem, QListWidget, QGroupBox, QComboBox)
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QPropertyAnimation, QEasingCurve, QMetaObject, QDateTime, QSettings
 from PyQt5.QtGui import QIcon, QTextCursor, QColor, QPalette, QPixmap, QPainter, QFont, QTransform, QTextCharFormat
 from PyQt5.QtSvg import QSvgWidget
 from dotenv import load_dotenv
@@ -71,6 +72,16 @@ except ImportError:
         @staticmethod
         def cleanup():
             pass
+            
+        @staticmethod
+        def set_tool_output_callback(callback):
+            """模拟设置工具输出回调函数"""
+            pass
+            
+        @staticmethod
+        def set_task_plan_callback(callback):
+            """模拟设置任务计划回调函数"""
+            pass
     
     def reset_messages():
         messages.clear()
@@ -91,6 +102,57 @@ except ImportError:
 # Define a custom exception for task errors
 class TaskExecutionError(Exception):
     pass
+
+class LoadingSpinner(QWidget):
+    """自定义加载动画组件"""
+    def __init__(self, parent=None, size=30, num_dots=8, dot_size=5):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.dots = num_dots
+        self.dot_size = dot_size
+        self.counter = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_rotation)
+        self.timer.start(100)  # 每100毫秒更新一次
+        
+    def update_rotation(self):
+        """更新旋转动画"""
+        self.counter = (self.counter + 1) % self.dots
+        self.update()
+        
+    def paintEvent(self, event):
+        """绘制组件"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 计算中心点和半径
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+        radius = min(center_x, center_y) - self.dot_size
+        
+        for i in range(self.dots):
+            # 计算点的位置
+            angle = 2 * 3.14159 * i / self.dots
+            x = center_x + radius * math.cos(angle)
+            y = center_y + radius * math.sin(angle)
+            
+            # 计算颜色 (当前位置最亮)
+            alpha = 255 - ((i - self.counter) % self.dots) * (255 // self.dots)
+            color = QColor(255, 165, 0, alpha)  # 橙色, 透明度变化
+            painter.setBrush(color)
+            painter.setPen(Qt.NoPen)
+            
+            # 绘制圆点
+            painter.drawEllipse(int(x - self.dot_size/2), int(y - self.dot_size/2), 
+                               self.dot_size, self.dot_size)
+        
+    def showEvent(self, event):
+        """显示时启动定时器"""
+        self.timer.start()
+        
+    def hideEvent(self, event):
+        """隐藏时停止定时器"""
+        self.timer.stop()
 
 class MessageHistory:
     def __init__(self):
@@ -214,57 +276,128 @@ class WorkerThread(QThread):
                         except Exception as e:
                             self.log_error(f"提取迭代信息时出错: {e}")
             
+            # 定义一个变量来存储最后的AI消息，供用户输入时使用
+            self.last_ai_message = None
+            
             # 注册用户输入回调函数
             def input_callback(prompt, timeout=60, error_message=None):
-                # 发射信号到主线程以显示对话框
-                self.safe_emit(self.user_input_needed, prompt, timeout, error_message)
+                try:
+                    # 尝试从消息历史中找出最后一条AI消息
+                    try:
+                        from deepseekAPI import messages
+                        # 先记录一下计划使用的消息，以防后面崩溃
+                        self.last_ai_message = "需要您的输入"
+                        
+                        for msg in reversed(messages):
+                            if msg.get("role") == "assistant" and msg.get("content"):
+                                self.last_ai_message = msg.get("content")
+                                break
+                        
+                        # 确保AI消息不是空的
+                        if not self.last_ai_message or not self.last_ai_message.strip():
+                            self.last_ai_message = "AI助手需要您的输入"
+                        
+                        # 将AI最后的消息发送到UI
+                        self.safe_emit(self.result_ready, self.last_ai_message)
+                        # 确保UI更新
+                        QApplication.processEvents()
+                        time.sleep(0.1)  # 短暂等待确保消息显示
+                    except Exception as e:
+                        self.log_error(f"获取AI消息时出错 (这不会影响功能): {str(e)}")
                 
-                # 创建一个事件循环等待结果
-                input_event = asyncio.Event()
-                self.parent()._current_input_event = input_event
-                self.parent()._current_input_result = None
+                    # 发射信号到主线程以显示对话框
+                    self.safe_emit(self.user_input_needed, prompt, timeout, error_message)
+                    
+                    # 创建一个事件循环等待结果
+                    input_event = asyncio.Event()
+                    try:
+                        # 获取主窗口引用，更安全的方式
+                        main_window = None
+                        if self.gui_ref:
+                            main_window = self.gui_ref
+                        elif self.parent():
+                            main_window = self.parent()
+                            
+                        if not main_window:
+                            self.log_error("无法获取主窗口引用，用户输入将失败")
+                            return "继续执行"  # 默认继续
+                            
+                        main_window._current_input_event = input_event
+                        main_window._current_input_result = None
+                        
+                        # 等待用户输入完成，增加超时处理
+                        try:
+                            loop.run_until_complete(asyncio.wait_for(input_event.wait(), timeout + 5))
+                        except asyncio.TimeoutError:
+                            self.log_error("等待用户输入超时")
+                            return "继续执行"  # 超时默认继续
+                        
+                        # 获取结果
+                        result = main_window._current_input_result
+                        
+                        # 清理
+                        main_window._current_input_event = None
+                        main_window._current_input_result = None
+                        
+                        # 如果结果为空，返回默认值
+                        if result is None:
+                            return "继续执行"
+                            
+                        return result
+                    except Exception as e:
+                        self.log_error(f"处理用户输入时出错: {str(e)}")
+                        return "继续执行"  # 出错时默认继续
+                except Exception as e:
+                    self.log_error(f"用户输入回调发生异常: {str(e)}")
+                    return "继续执行"  # 如果出现任何错误，返回默认值
+            
+            # 设置回调，使用异常处理
+            try:
+                APIBridge.set_tool_output_callback(tool_output_callback)
+                APIBridge.set_task_plan_callback(task_plan_callback)
                 
-                # 等待用户输入完成
-                loop.run_until_complete(asyncio.wait_for(input_event.wait(), timeout + 5))
+                # 设置用户输入回调
+                from input_utils import register_input_callback
+                register_input_callback(input_callback)
+            except Exception as e:
+                self.log_error(f"设置回调函数时出错: {str(e)}")
+            
+            try:
+                # 使用 APIBridge 执行任务
+                result = loop.run_until_complete(APIBridge.execute_task(self.input_text))
                 
-                # 获取结果
-                result = self.parent()._current_input_result
+                # 获取并发送当前token数量
+                try:
+                    from api_wrapper import APIBridge as ExternalAPIBridge
+                    token_count = ExternalAPIBridge.get_token_count()
+                    self.safe_emit(self.tool_usage_ready, "token_count", str(token_count))
+                except Exception as e:
+                    self.log_error(f"获取token计数时出错: {str(e)}")
                 
-                # 清理
-                self.parent()._current_input_event = None
-                self.parent()._current_input_result = None
+                # 获取并发送任务计划和摘要
+                try:
+                    task_plan = APIBridge.get_task_plan()
+                    if task_plan and task_plan != "暂无任务计划信息":
+                        self.safe_emit(self.task_plan_ready, task_plan)
+                except Exception as e:
+                    self.log_error(f"获取任务计划时出错: {str(e)}")
                 
-                return result
-            
-            # 设置回调
-            APIBridge.set_tool_output_callback(tool_output_callback)
-            APIBridge.set_task_plan_callback(task_plan_callback)
-            
-            # 设置用户输入回调
-            from input_utils import register_input_callback
-            register_input_callback(input_callback)
-            
-            # 使用 APIBridge 执行任务
-            result = loop.run_until_complete(APIBridge.execute_task(self.input_text))
-            
-            # 获取并发送当前token数量
-            token_count = APIBridge.get_token_count()
-            self.safe_emit(self.tool_usage_ready, "token_count", str(token_count))
-            
-            # 获取并发送任务计划和摘要
-            task_plan = APIBridge.get_task_plan()
-            if task_plan and task_plan != "暂无任务计划信息":
-                self.safe_emit(self.task_plan_ready, task_plan)
-            
-            # 获取并发送最新的工具执行结果
-            tool_output = APIBridge.get_latest_tool_output()
-            if tool_output:
-                self.safe_emit(self.console_output_ready, tool_output)
-                # 通知工具输出状态更新了
-                self.safe_emit(self.tool_usage_ready, "工具输出", "已更新")
-            
-            # 发送完成信号
-            self.safe_emit(self.result_ready, result)
+                # 获取并发送最新的工具执行结果
+                try:
+                    tool_output = APIBridge.get_latest_tool_output()
+                    if tool_output:
+                        self.safe_emit(self.console_output_ready, tool_output)
+                        # 通知工具输出状态更新了
+                        self.safe_emit(self.tool_usage_ready, "工具输出", "已更新")
+                except Exception as e:
+                    self.log_error(f"获取工具输出时出错: {str(e)}")
+                
+                # 发送完成信号
+                self.safe_emit(self.result_ready, result)
+            except Exception as e:
+                error_msg = f"执行任务时出错: {str(e)}"
+                self.log_error(error_msg)
+                self.safe_emit(self.error_occurred, error_msg)
             
         except Exception as e:
             # 捕获意外错误
@@ -274,246 +407,656 @@ class WorkerThread(QThread):
             
         finally:
             # 清除回调
-            APIBridge.set_tool_output_callback(None)
-            APIBridge.set_task_plan_callback(None)
-            
-            # 注销用户输入回调
-            from input_utils import register_input_callback
-            register_input_callback(None)
+            try:
+                try:
+                    APIBridge.set_tool_output_callback(None)
+                except:
+                    pass
+                    
+                try:
+                    APIBridge.set_task_plan_callback(None)
+                except:
+                    pass
+                
+                # 注销用户输入回调
+                try:
+                    from input_utils import register_input_callback
+                    register_input_callback(None)
+                except:
+                    pass
+            except Exception as e:
+                print(f"清理回调时出错: {str(e)}")
             
             # 隐藏加载动画
             self.safe_emit(self.loading_state_changed, False)
             
             # 确保清理事件循环
             if loop and not loop.is_closed():
-                loop.close()
-
-class FloatingBall(QWidget):
-    clicked = pyqtSignal()
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        # 增加窗口大小以确保内容完全显示
-        self.setFixedSize(120, 120)
+                try:
+                    loop.close()
+                except Exception as e:
+                    print(f"关闭事件循环时出错: {str(e)}")
+                    
+    async def _set_event_async(self):
+        """安全地设置事件"""
+        if self._current_input_event is not None:
+            self._current_input_event.set()
         
-        # 创建图形视图和场景
-        self.scene = QGraphicsScene(0, 0, 120, 120)  # 明确设置场景大小
-        self.view = QGraphicsView(self.scene, self)
-        self.view.setStyleSheet("background: transparent; border: none;")
-        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.view.setRenderHint(QPainter.Antialiasing)  # 添加抗锯齿
-        self.view.setRenderHint(QPainter.SmoothPixmapTransform)
-        
-        # 创建emoji文本项
-        self.emoji_item = self.scene.addText("🤖")
-        self.emoji_item.setFont(QFont("Arial", 40))
-        self.emoji_item.setDefaultTextColor(QColor(0, 0, 0))
-        
-        # 设置视图大小和场景范围
-        self.view.setFixedSize(120, 120)
-        self.view.setSceneRect(0, 0, 120, 120)  # 确保视图显示整个场景
-        
-        # 计算并设置emoji的中心点位置，使其居中显示
-        emoji_rect = self.emoji_item.boundingRect()
-        self.emoji_item.setPos(
-            (self.view.width() - emoji_rect.width()) / 2,
-            (self.view.height() - emoji_rect.height()) / 2
-        )
-        
-        # 存储emoji中心点坐标，用于旋转
-        self.emoji_center = self.emoji_item.boundingRect().center()
-        
-        # 使用无边距布局
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.view)
-        self.setLayout(layout)
-        
-        # 初始化拖动相关变量
-        self.drag_position = None
-        self.setStyleSheet("""
-            QWidget {
-                background-color: rgba(255, 255, 255, 180); /* 增加不透明度 */
-                border-radius: 60px; /* 调整为窗口大小的一半 */
-            }
-        """)
-        
-        # 设置默认位置为桌面右侧
-        screen = QApplication.primaryScreen().geometry()
-        self.move(screen.width() - self.width() - 20, screen.height() // 2 - self.height() // 2)
-        
-        # 创建旋转动画，降低旋转速度
-        self.rotation_angle = 0
-        self.rotation_timer = QTimer(self)
-        self.rotation_timer.timeout.connect(self.rotate)
-        self.rotation_timer.start(80)  # 降低旋转速度，之前是50ms
-
-    def rotate(self):
-        # 更新旋转角度，减小旋转幅度
-        self.rotation_angle = (self.rotation_angle + 3) % 360  # 减小旋转步长，之前是5
-        
-        # 创建变换并设置旋转中心点
-        transform = QTransform()
-        # 先移动到中心点
-        transform.translate(self.emoji_center.x(), self.emoji_center.y())
-        # 执行旋转
-        transform.rotate(self.rotation_angle)
-        # 再移回原位置
-        transform.translate(-self.emoji_center.x(), -self.emoji_center.y())
-        
-        # 应用变换
-        self.emoji_item.setTransform(transform)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            # 记录鼠标按下时的位置
-            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
-            # 设置鼠标追踪开启，以接收连续的mouseMoveEvent
-            self.setMouseTracking(True)
-            event.accept()
-        
-        # 发送点击信号
-        self.clicked.emit()
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton and self.drag_position is not None:
-            # 计算移动位置
-            self.move(event.globalPos() - self.drag_position)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            # 释放鼠标时清除拖动位置
-            self.drag_position = None
-            self.setMouseTracking(False)
-            event.accept()
-
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            # 双击时显示主窗口并隐藏悬浮球
-            self.parent().showNormal()
-            self.parent().activateWindow()
-            self.hide()
-            event.accept()
-
-class LoadingSpinner(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumSize(40, 40)
-        self.setMaximumSize(40, 40)
-        
-        # 创建更现代化的加载动画SVG
-        self.svg_str = """
-        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="#E0E0E0" stroke-width="2" />
-          <path d="M12 2C6.48 2 2 6.48 2 12" stroke="#4CAF50" stroke-width="3" stroke-linecap="round">
-            <animateTransform
-              attributeName="transform"
-              type="rotate"
-              from="0 12 12"
-              to="360 12 12"
-              dur="0.8s"
-              repeatCount="indefinite" />
-          </path>
-          <circle cx="12" cy="12" r="1" fill="#4CAF50">
-            <animate
-              attributeName="r"
-              values="1;3;1"
-              dur="1s"
-              repeatCount="indefinite" />
-          </circle>
-        </svg>
-        """
-        
-        # 创建并设置SVG部件
-        self.svg_widget = QSvgWidget(self)
-        self.svg_widget.setGeometry(0, 0, 40, 40)
-        self.svg_widget.load(bytearray(self.svg_str, 'utf-8'))
-        
-        # 创建布局
-        layout = QVBoxLayout()
-        layout.addWidget(self.svg_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.setLayout(layout)
-        self.hide()  # 初始时隐藏
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
-        # Window setup
-        self.setWindowTitle("🤖 DeepSeek AI Assistant")
-        self.setMinimumSize(900, 700)
+        # 设置窗口标题和大小
+        self.setWindowTitle("DeepSeek PC Manager")
+        self.resize(1200, 800)
         
-        # Create a custom icon with emoji
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        font = QFont()
-        font.setPointSize(24)
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, "🤖")
-        painter.end()
-        self.setWindowIcon(QIcon(pixmap))
-        
-        # 初始化用户输入相关变量
+        # 初始化成员变量
         self._current_input_event = None
         self._current_input_result = None
-        
-        # Initialize variables
-        self.messages_history = MessageHistory()
-        self.task_summary = []
+        self.current_tool = "无"
         self.worker = None
-        self.current_tool = "None"
-        self.secondary_input_needed = False
-        self.secondary_input = None
-        self.prompt = None
-        self.input_dialog = None
         
-        # Setup UI
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
+        # 初始化UI
+        self.init_ui()
         
-        # Main layout with splitter
-        self.main_layout = QVBoxLayout(self.central_widget)
+        # 创建系统托盘图标
+        self.init_tray_icon()
+        
+        # 创建浮动球
+        self.init_floating_ball()
+        
+        # 更新时钟
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_time)
+        self.timer.start(1000)  # 每秒更新一次
+    
+    def init_ui(self):
+        # 主布局为水平分割器
         self.main_splitter = QSplitter(Qt.Horizontal)
+        self.setCentralWidget(self.main_splitter)
         
-        # Create left and right panels
+        # 初始化左右面板
         self.init_left_panel()
         self.init_right_panel()
         
-        # Add panels to splitter
+        # 添加面板到分割器
         self.main_splitter.addWidget(self.left_panel)
         self.main_splitter.addWidget(self.right_panel)
-        self.main_splitter.setSizes([int(self.width() * 0.65), int(self.width() * 0.35)])
         
-        # Add splitter to main layout
-        self.main_layout.addWidget(self.main_splitter)
+        # 设置初始分割比例 (70% 左面板, 30% 右面板)
+        self.main_splitter.setSizes([int(self.width() * 0.7), int(self.width() * 0.3)])
         
-        # Create system tray icon
-        self.init_system_tray()
+        # 隐藏加载动画
+        self.spinner.hide()
         
-        # Create floating ball (hidden initially)
-        self.floating_ball = FloatingBall()
-        self.floating_ball.clicked.connect(self.show_from_floating_ball)
-        self.floating_ball.hide()
+        # 创建菜单栏
+        self.create_menu_bar()
+    
+    def create_menu_bar(self):
+        """创建菜单栏"""
+        menubar = self.menuBar()
         
-        # Load environment variables
-        load_dotenv()
+        # 文件菜单
+        file_menu = menubar.addMenu('文件')
         
-        # Apply stylesheet
-        self.apply_stylesheet()
+        # 添加设置选项
+        settings_action = QAction('设置', self)
+        settings_action.triggered.connect(self.show_settings)
+        file_menu.addAction(settings_action)
         
-        # Start time updater
-        self.start_time_updater()
+        file_menu.addSeparator()
         
-        # 连接用户输入信号
-        self.worker = None
+        # 添加退出选项
+        exit_action = QAction('退出', self)
+        exit_action.triggered.connect(self.quit_application)
+        file_menu.addAction(exit_action)
+        
+        # 帮助菜单
+        help_menu = menubar.addMenu('帮助')
+        
+        # 添加关于选项
+        about_action = QAction('关于', self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+        
+        # 添加帮助文档选项
+        help_doc_action = QAction('帮助文档', self)
+        help_doc_action.triggered.connect(self.show_help)
+        help_menu.addAction(help_doc_action)
+    
+    def show_settings(self):
+        """显示设置对话框"""
+        settings_dialog = QDialog(self)
+        settings_dialog.setWindowTitle("设置")
+        settings_dialog.setMinimumWidth(500)
+        
+        layout = QVBoxLayout(settings_dialog)
+        
+        # 添加设置选项
+        settings_group = QGroupBox("基本设置")
+        settings_layout = QVBoxLayout(settings_group)
+        
+        # API设置
+        api_layout = QHBoxLayout()
+        api_label = QLabel("API密钥:")
+        api_input = QLineEdit()
+        api_input.setEchoMode(QLineEdit.Password)
+        api_layout.addWidget(api_label)
+        api_layout.addWidget(api_input)
+        settings_layout.addLayout(api_layout)
+        
+        # 主题设置
+        theme_layout = QHBoxLayout()
+        theme_label = QLabel("主题:")
+        theme_combo = QComboBox()
+        theme_combo.addItems(["默认", "暗色", "浅色"])
+        theme_layout.addWidget(theme_label)
+        theme_layout.addWidget(theme_combo)
+        settings_layout.addLayout(theme_layout)
+        
+        # 语言设置
+        lang_layout = QHBoxLayout()
+        lang_label = QLabel("语言:")
+        lang_combo = QComboBox()
+        lang_combo.addItems(["简体中文", "English"])
+        lang_layout.addWidget(lang_label)
+        lang_layout.addWidget(lang_combo)
+        settings_layout.addLayout(lang_layout)
+        
+        layout.addWidget(settings_group)
+        
+        # 添加按钮
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(settings_dialog.accept)
+        button_box.rejected.connect(settings_dialog.reject)
+        layout.addWidget(button_box)
+        
+        settings_dialog.exec_()
+        
+    def show_about(self):
+        """显示关于对话框"""
+        about_text = """
+        <h2>DeepSeek PC Manager</h2>
+        <p>版本: 1.0.0</p>
+        <p>一个智能的PC管理助手，帮助您更高效地管理计算机。</p>
+        <p>© 2023 DeepSeek Team</p>
+        """
+        
+        QMessageBox.about(self, "关于", about_text)
+        
+    def show_help(self):
+        """显示帮助文档"""
+        help_dialog = QDialog(self)
+        help_dialog.setWindowTitle("帮助文档")
+        help_dialog.setMinimumSize(800, 600)
+        
+        layout = QVBoxLayout(help_dialog)
+        
+        # 创建帮助内容
+        help_text = QTextEdit()
+        help_text.setReadOnly(True)
+        help_text.setHtml("""
+        <h1>DeepSeek PC Manager 帮助文档</h1>
+        
+        <h2>基本功能</h2>
+        <p>DeepSeek PC Manager 是一个智能的PC管理助手，可以帮助您：</p>
+        <ul>
+            <li>系统优化</li>
+            <li>软件管理</li>
+            <li>文件整理</li>
+            <li>性能监控</li>
+        </ul>
+        
+        <h2>使用方法</h2>
+        <p>在输入框中输入您的需求，AI助手会帮您完成任务。</p>
+        
+        <h2>常见问题</h2>
+        <p><b>Q: 如何开始使用？</b></p>
+        <p>A: 直接在输入框中输入您的需求即可。</p>
+        
+        <p><b>Q: 支持哪些功能？</b></p>
+        <p>A: 支持系统优化、软件管理、文件整理、性能监控等多种功能。</p>
+        """)
+        
+        layout.addWidget(help_text)
+        
+        # 添加关闭按钮
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(help_dialog.accept)
+        layout.addWidget(close_button)
+        
+        help_dialog.exec_()
+    
+    def update_time(self):
+        """更新时间标签"""
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.time_label.setText("🕒 " + current_time)
+    
+    def init_tray_icon(self):
+        """初始化系统托盘图标"""
+        try:
+            self.tray_icon = QSystemTrayIcon(self)
+            
+            # 使用简单的默认图标
+            app_icon = QIcon()
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(QColor('#1976D2'))
+            app_icon.addPixmap(pixmap)
+            self.tray_icon.setIcon(app_icon)
+            
+            # 创建托盘菜单
+            tray_menu = QMenu()
+            
+            # 添加显示操作
+            show_action = QAction("显示", self)
+            show_action.triggered.connect(self.show_from_tray)
+            tray_menu.addAction(show_action)
+            
+            # 添加退出操作
+            quit_action = QAction("退出", self)
+            quit_action.triggered.connect(self.quit_application)
+            tray_menu.addAction(quit_action)
+            
+            # 设置托盘菜单
+            self.tray_icon.setContextMenu(tray_menu)
+            
+            # 连接托盘图标激活信号
+            self.tray_icon.activated.connect(self.tray_icon_activated)
+            
+            # 显示托盘图标
+            self.tray_icon.show()
+        except Exception as e:
+            print(f"初始化系统托盘时出错: {str(e)}")
+    
+    def init_floating_ball(self):
+        """初始化浮动球"""
+        try:
+            self.floating_ball = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+            self.floating_ball.setFixedSize(60, 60)
+            # 设置窗口背景透明
+            self.floating_ball.setAttribute(Qt.WA_TranslucentBackground)
+            
+            layout = QVBoxLayout(self.floating_ball)
+            layout.setContentsMargins(0, 0, 0, 0)
+            
+            # 使用机器人emoji的标签
+            label = QLabel("🤖")
+            label.setStyleSheet("""
+                background-color: transparent;
+                color: white;
+                font-size: 30px;
+                font-weight: bold;
+            """)
+            label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(label)
+            
+            # 设置圆形窗口样式
+            self.floating_ball.setStyleSheet("""
+                QWidget {
+                    background-color: transparent;
+                }
+            """)
+            
+            # 添加鼠标事件处理
+            self.floating_ball.mousePressEvent = self.floating_ball_mouse_press
+            self.floating_ball.mouseMoveEvent = self.floating_ball_mouse_move
+            self.floating_ball.mouseReleaseEvent = self.floating_ball_mouse_release
+            self.floating_ball.mouseDoubleClickEvent = self.floating_ball_double_click
+            
+            # 初始化拖动相关变量
+            self._drag_pos = None
+            self._is_dragging = False
+            
+            # 从设置中读取上次的位置
+            try:
+                settings = QSettings()
+                pos = settings.value("FloatingBall/Position")
+                if pos:
+                    self.floating_ball.move(pos)
+                else:
+                    # 默认位置在屏幕右上角
+                    screen = QApplication.primaryScreen().geometry()
+                    self.floating_ball.move(screen.width() - 80, 20)
+            except Exception as e:
+                print(f"读取悬浮球位置时出错: {str(e)}")
+                # 默认位置在屏幕右上角
+                screen = QApplication.primaryScreen().geometry()
+                self.floating_ball.move(screen.width() - 80, 20)
+            
+            # 初始隐藏浮动球
+            self.floating_ball.hide()
+            
+        except Exception as e:
+            print(f"初始化浮动球时出错: {str(e)}")
+            self.floating_ball = None
+            
+    def floating_ball_mouse_press(self, event):
+        """处理浮动球鼠标按下事件"""
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPos() - self.floating_ball.frameGeometry().topLeft()
+            self._is_dragging = False  # 初始设置为False，在移动时才设置为True
+            event.accept()
+            
+    def floating_ball_mouse_move(self, event):
+        """处理浮动球鼠标移动事件"""
+        if event.buttons() == Qt.LeftButton and self._drag_pos is not None:
+            self._is_dragging = True  # 标记正在拖动
+            # 计算新位置
+            new_pos = event.globalPos() - self._drag_pos
+            
+            # 确保不会拖出屏幕
+            screen = QApplication.primaryScreen().geometry()
+            x = max(0, min(new_pos.x(), screen.width() - self.floating_ball.width()))
+            y = max(0, min(new_pos.y(), screen.height() - self.floating_ball.height()))
+            
+            self.floating_ball.move(x, y)
+            event.accept()
+            
+    def floating_ball_mouse_release(self, event):
+        """处理浮动球鼠标释放事件"""
+        if event.button() == Qt.LeftButton:
+            # 如果没有拖动，则认为是点击事件
+            if not self._is_dragging:
+                self.show_from_floating_ball()
+            else:
+                # 保存新位置
+                try:
+                    settings = QSettings()
+                    settings.setValue("FloatingBall/Position", self.floating_ball.pos())
+                except Exception as e:
+                    print(f"保存悬浮球位置时出错: {str(e)}")
+            
+            self._drag_pos = None
+            self._is_dragging = False
+            event.accept()
+            
+    def floating_ball_double_click(self, event):
+        """处理浮动球双击事件"""
+        if event.button() == Qt.LeftButton:
+            self.show_from_floating_ball()
+            event.accept()
+            
+    def changeEvent(self, event):
+        if event.type() == event.WindowStateChange:
+            if self.windowState() & Qt.WindowMinimized:
+                self.hide()
+                # 显示悬浮球在上次保存的位置
+                self.floating_ball.show()
+                # 不需要移动到当前窗口位置
+                # self.floating_ball.move(self.x(), self.y())
 
+    def handle_secondary_input_needed(self, input_event_data):
+        """处理需要用户二次输入的情况，例如工具执行失败需要用户选择继续或终止"""
+        try:
+            # 创建一个自定义dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("需要您的输入")
+            layout = QVBoxLayout(dialog)
+            
+            # 显示解释说明
+            explanation = input_event_data.get('explanation', '工具执行需要您的输入')
+            explanation_label = QLabel(explanation)
+            explanation_label.setWordWrap(True)
+            explanation_label.setStyleSheet("padding: 10px; font-size: 14px;")
+            layout.addWidget(explanation_label)
+            
+            # 添加选项
+            options = input_event_data.get('options', [])
+            if options:
+                options_group = QGroupBox("请选择:")
+                options_layout = QVBoxLayout(options_group)
+                
+                for i, option in enumerate(options):
+                    option_btn = QPushButton(f"{i+1}. {option}")
+                    option_btn.clicked.connect(lambda _, idx=i+1: self.handle_option_selected(dialog, str(idx)))
+                    options_layout.addWidget(option_btn)
+                
+                layout.addWidget(options_group)
+            
+            # 输入框和确认按钮
+            input_layout = QHBoxLayout()
+            input_field = QLineEdit()
+            input_field.setPlaceholderText("在此输入您的回应...")
+            input_layout.addWidget(input_field, 3)
+            
+            confirm_btn = QPushButton("确认")
+            confirm_btn.clicked.connect(lambda: self.handle_option_selected(dialog, input_field.text()))
+            input_layout.addWidget(confirm_btn, 1)
+            
+            layout.addLayout(input_layout)
+            
+            # 添加取消按钮
+            cancel_btn = QPushButton("取消")
+            cancel_btn.clicked.connect(dialog.reject)
+            layout.addWidget(cancel_btn)
+            
+            # 保存当前的事件数据
+            self._current_input_event = dialog
+            self._current_input_result = None
+            
+            # 显示消息框并等待用户选择
+            dialog.setModal(True)
+            
+            # 在请求用户输入前，先发送解释信息到聊天窗口
+            if 'explanation_msg' in input_event_data and input_event_data['explanation_msg']:
+                self.append_message("assistant", input_event_data['explanation_msg'])
+            
+            # 显示对话框等待用户输入
+            if dialog.exec_():
+                return self._current_input_result
+            else:
+                return "2"  # 默认选择终止
+                
+        except Exception as e:
+            self.log_error(f"处理二次输入时出错: {str(e)}")
+            return "2"  # 出错时默认终止
+            
+    def handle_option_selected(self, dialog, result):
+        """处理用户选择的选项"""
+        self._current_input_result = result
+        dialog.accept()
+
+    def _ensure_single_worker(self):
+        """确保同一时间只有一个工作线程在运行"""
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            try:
+                print("停止之前的工作线程...")
+                self.worker.quit()
+                # 等待最多2秒
+                if not self.worker.wait(2000):
+                    print("强制终止之前的工作线程")
+                    self.worker.terminate()
+                self.worker = None
+            except Exception as e:
+                print(f"清理之前的工作线程时出错: {e}")
+
+    def init_right_panel(self):
+        self.right_panel = QWidget()
+        self.right_layout = QVBoxLayout(self.right_panel)
+        
+        # Tab widget for task plan, console output, and tool history
+        self.tab_widget = QTabWidget()
+        
+        # Task Plan Tab
+        self.task_plan_tab = QTextEdit()
+        self.task_plan_tab.setReadOnly(True)
+        self.task_plan_tab.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #E0E0E0;
+                border-radius: 8px;
+                background-color: #FAFAFA;
+                padding: 10px;
+                font-size: 13px;
+                font-family: 'Consolas', 'Courier New', monospace;
+            }
+        """)
+        self.tab_widget.addTab(self.task_plan_tab, "📝 任务计划")
+        
+        # Console Output Tab
+        self.console_output_tab = QTextEdit()
+        self.console_output_tab.setReadOnly(True)
+        self.console_output_tab.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #E0E0E0;
+                border-radius: 8px;
+                background-color: #2B2B2B;
+                color: #A9B7C6;
+                padding: 10px;
+                font-size: 13px;
+                font-family: 'Consolas', 'Courier New', monospace;
+            }
+        """)
+        self.tab_widget.addTab(self.console_output_tab, "🖥️ 控制台输出")
+        
+        # Tool History Tab
+        tool_history_widget = QWidget()
+        tool_history_layout = QVBoxLayout(tool_history_widget)
+        
+        self.tool_history = QListWidget()
+        self.tool_history.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #E0E0E0;
+                border-radius: 8px;
+                background-color: #FAFAFA;
+                padding: 5px;
+                font-size: 13px;
+            }
+            QListWidget::item {
+                border-bottom: 1px solid #F0F0F0;
+                padding: 5px;
+            }
+            QListWidget::item:selected {
+                background-color: #E3F2FD;
+                color: #1976D2;
+            }
+        """)
+        tool_history_layout.addWidget(QLabel("最近使用的工具:"))
+        tool_history_layout.addWidget(self.tool_history)
+        
+        # Add clear history button
+        clear_history_btn = QPushButton("清除历史")
+        clear_history_btn.clicked.connect(lambda: self.tool_history.clear())
+        clear_history_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F44336;
+                color: white;
+                border: none;
+                border-radius: 15px;
+                padding: 5px 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #D32F2F;
+            }
+        """)
+        tool_history_layout.addWidget(clear_history_btn)
+        
+        self.tab_widget.addTab(tool_history_widget, "🧰 工具历史")
+        
+        # Task Summary
+        task_summary_group = QGroupBox("📊 任务摘要")
+        task_summary_layout = QVBoxLayout(task_summary_group)
+        
+        self.task_summary = QTextEdit()
+        self.task_summary.setReadOnly(True)
+        self.task_summary.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #E0E0E0;
+                border-radius: 8px;
+                background-color: white;
+                padding: 10px;
+                font-size: 13px;
+            }
+        """)
+        self.task_summary.setMaximumHeight(150)
+        task_summary_layout.addWidget(self.task_summary)
+        
+        # Add components to right panel
+        self.right_layout.addWidget(self.tab_widget, 7)  # Tab widget takes 70% of space
+        self.right_layout.addWidget(task_summary_group, 3)  # Task summary takes 30% of space
+
+    def update_loading_state(self, state):
+        """更新加载状态，显示或隐藏加载动画"""
+        if state:
+            self.spinner.show()  # 显示加载动画
+            
+            # 如果状态栏右侧没有加载状态文本，则添加
+            if not hasattr(self, 'loading_label') or not self.loading_label:
+                self.loading_label = QLabel("正在处理请求... ")
+                self.loading_label.setStyleSheet("color: #FF9800; font-weight: bold;")
+                self.status_layout.addWidget(self.loading_label)
+        else:
+            self.spinner.hide()  # 隐藏加载动画
+            
+            # 隐藏加载状态文本
+            if hasattr(self, 'loading_label') and self.loading_label:
+                self.loading_label.hide()
+                self.status_layout.removeWidget(self.loading_label)
+                self.loading_label.deleteLater()
+                self.loading_label = None
+                
+    def handle_error(self, error_msg):
+        """处理错误信息"""
+        # 记录错误
+        try:
+            with open("error_log.txt", "a", encoding="utf-8") as f:
+                f.write(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {error_msg}\n")
+        except Exception as e:
+            print(f"无法写入错误日志: {e}", file=sys.stderr)
+        
+        # 在聊天窗口显示错误
+        self.chat_display.append(
+            f'<div style="color: #D32F2F; font-size: 14px;">'
+            f'<b>⚠️ 错误:</b> {error_msg}</div>'
+        )
+        
+        # 在控制台输出窗口也显示错误
+        self.console_output_tab.append(
+            f'<div style="color: #D32F2F; background-color: #FFEBEE; padding: 5px; '
+            f'border-left: 4px solid #D32F2F; margin: 5px 0;">'
+            f'<b>执行错误:</b><br/>{error_msg}</div>'
+        )
+        
+        # 更新工具状态
+        self.update_tool_status("发生错误", "错误")
+        
+        # 隐藏加载动画
+        self.update_loading_state(False)
+
+    def show_from_tray(self):
+        self.showNormal()
+        self.activateWindow()
+
+    def show_from_floating_ball(self):
+        self.showNormal()
+        self.activateWindow()
+        self.floating_ball.hide()
+
+    def tray_icon_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            self.show_from_tray()
+
+    def closeEvent(self, event):
+        self.quit_application()
+
+    def quit_application(self):
+        # 在程序退出前确保所有线程正确结束
+        try:
+            if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+                print("等待工作线程结束...")
+                self.worker.quit()
+                # 等待最多3秒
+                if not self.worker.wait(3000):
+                    print("强制终止工作线程")
+                    self.worker.terminate()
+            
+            # 使用 APIBridge 清理资源
+            APIBridge.cleanup()
+        except Exception as e:
+            print(f"清理线程时出错: {e}")
+        
+        QApplication.quit()
+        
     def init_left_panel(self):
         self.left_panel = QWidget()
         self.left_layout = QVBoxLayout(self.left_panel)
@@ -605,333 +1148,7 @@ class MainWindow(QMainWindow):
         input_layout.addWidget(self.send_button)
         
         self.left_layout.addWidget(input_container)
-
-    def init_right_panel(self):
-        self.right_panel = QWidget()
-        self.right_layout = QVBoxLayout(self.right_panel)
         
-        # Tab widget for different sections
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
-                padding: 5px;
-            }
-            QTabBar::tab {
-                background-color: #F5F5F5;
-                border: 1px solid #E0E0E0;
-                border-bottom-color: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                padding: 8px 12px;
-                margin-right: 2px;
-            }
-            QTabBar::tab:selected {
-                background-color: white;
-                border-bottom-color: white;
-                color: #4CAF50;
-                font-weight: bold;
-            }
-        """)
-        
-        # Task plan tab
-        self.task_plan_tab = QTextEdit()
-        self.task_plan_tab.setReadOnly(True)
-        self.task_plan_tab.setPlaceholderText("任务计划将在此显示...")
-        # 添加初始说明
-        self.task_plan_tab.setHtml("""
-        <div style="color:#666666; font-style:italic; text-align:center; margin-top:20px;">
-            <p>任务计划和摘要会实时显示在这里</p>
-            <p>包括工作进度和状态更新</p>
-        </div>
-        """)
-        self.tab_widget.addTab(self.task_plan_tab, "📋 任务计划")
-        
-        # Console output tab
-        self.console_output_tab = QTextEdit()
-        self.console_output_tab.setReadOnly(True)
-        self.console_output_tab.setPlaceholderText("工具输出将在此显示...")
-        # 添加初始说明
-        self.console_output_tab.setHtml("""
-        <div style="color:#666666; font-style:italic; text-align:center; margin-top:20px;">
-            <p>工具执行结果会实时显示在这里</p>
-            <p>您可以看到每个工具的输出和可能的错误信息</p>
-        </div>
-        """)
-        self.console_output_tab.setStyleSheet("font-family: 'Courier New', monospace;")
-        self.tab_widget.addTab(self.console_output_tab, "🔧 工具输出")
-        
-        # Tools history tab
-        tools_tab = QWidget()
-        tools_layout = QVBoxLayout(tools_tab)
-        
-        # 添加工具历史列表
-        tools_layout.addWidget(QLabel("🔨 已使用工具历史:"))
-        self.tool_history = QListWidget()
-        self.tool_history.setAlternatingRowColors(True)
-        self.tool_history.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #E0E0E0;
-                border-radius: 5px;
-                background-color: white;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            QListWidget::item {
-                padding: 5px;
-                border-bottom: 1px solid #F0F0F0;
-            }
-            QListWidget::item:alternate {
-                background-color: #F8F8F8;
-            }
-        """)
-        tools_layout.addWidget(self.tool_history)
-        
-        self.tab_widget.addTab(tools_tab, "🔨 工具历史")
-        
-        # Settings tab
-        self.settings_tab = QWidget()
-        self.init_settings_tab()
-        self.tab_widget.addTab(self.settings_tab, "⚙️ 设置")
-        
-        # Help tab
-        self.help_tab = QTextEdit()
-        self.help_tab.setReadOnly(True)
-        self.load_help_content()
-        self.tab_widget.addTab(self.help_tab, "❓ 帮助")
-        
-        self.right_layout.addWidget(self.tab_widget)
-        
-        # Action buttons
-        action_buttons = QWidget()
-        action_layout = QHBoxLayout(action_buttons)
-        
-        # Import button
-        self.import_button = QPushButton("📥 导入对话")
-        self.import_button.clicked.connect(self.import_chat_history)
-        action_layout.addWidget(self.import_button)
-        
-        # Export button
-        self.export_button = QPushButton("📤 导出对话")
-        self.export_button.clicked.connect(self.export_chat_history)
-        action_layout.addWidget(self.export_button)
-        
-        # Summary button
-        self.summary_button = QPushButton("📝 查看摘要")
-        self.summary_button.clicked.connect(self.show_summary)
-        action_layout.addWidget(self.summary_button)
-        
-        self.right_layout.addWidget(action_buttons)
-
-    def init_settings_tab(self):
-        settings_layout = QVBoxLayout(self.settings_tab)
-        
-        # API Keys section
-        keys_group = QWidget()
-        keys_layout = QVBoxLayout(keys_group)
-        keys_layout.setContentsMargins(0, 0, 0, 10)
-        
-        # DeepSeek API Key
-        keys_layout.addWidget(QLabel("🔑 DeepSeek API Key:"))
-        self.api_key_input = QLineEdit()
-        self.api_key_input.setText(os.getenv("api_key", ""))
-        self.api_key_input.setEchoMode(QLineEdit.Password)  # Hide by default
-        keys_layout.addWidget(self.api_key_input)
-        
-        # Weather API Key
-        keys_layout.addWidget(QLabel("🌦️ Weather API Key:"))
-        self.weather_key_input = QLineEdit()
-        self.weather_key_input.setText(os.getenv("key", ""))
-        keys_layout.addWidget(self.weather_key_input)
-        
-        settings_layout.addWidget(keys_group)
-        
-        # Email settings section
-        email_group = QWidget()
-        email_layout = QVBoxLayout(email_group)
-        email_layout.setContentsMargins(0, 0, 0, 10)
-        
-        # Email address
-        email_layout.addWidget(QLabel("📧 Email Address:"))
-        self.email_input = QLineEdit()
-        self.email_input.setText(os.getenv("QQ_EMAIL", ""))
-        email_layout.addWidget(self.email_input)
-        
-        # Auth code
-        email_layout.addWidget(QLabel("🔐 Email Auth Code:"))
-        self.auth_code_input = QLineEdit()
-        self.auth_code_input.setText(os.getenv("AUTH_CODE", ""))
-        self.auth_code_input.setEchoMode(QLineEdit.Password)
-        email_layout.addWidget(self.auth_code_input)
-        
-        settings_layout.addWidget(email_group)
-        
-        # Save settings button
-        self.save_settings_button = QPushButton("💾 Save Settings")
-        self.save_settings_button.clicked.connect(self.save_settings)
-        self.save_settings_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1E88E5;
-            }
-        """)
-        settings_layout.addWidget(self.save_settings_button)
-        
-        # User information section
-        settings_layout.addWidget(QLabel("👤 User Information:"))
-        self.user_info_edit = QTextEdit()
-        self.load_user_info()
-        settings_layout.addWidget(self.user_info_edit)
-        
-        # Save user info button
-        self.save_user_info_button = QPushButton("🔄 Update User Info")
-        self.save_user_info_button.clicked.connect(self.save_user_info)
-        self.save_user_info_button.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #FB8C00;
-            }
-        """)
-        settings_layout.addWidget(self.save_user_info_button)
-
-    def init_system_tray(self):
-        self.tray_icon = QSystemTrayIcon(self)
-        
-        # Create a custom icon with emoji
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        font = QFont()
-        font.setPointSize(24)
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, "🤖")
-        painter.end()
-        
-        self.tray_icon.setIcon(QIcon(pixmap))
-        self.tray_icon.setToolTip("DeepSeek AI Assistant")
-        
-        # Create tray menu
-        tray_menu = QMenu()
-        
-        show_action = QAction("Show Assistant", self)
-        show_action.triggered.connect(self.show_from_tray)
-        tray_menu.addAction(show_action)
-        
-        quit_action = QAction("Quit", self)
-        quit_action.triggered.connect(self.quit_application)
-        tray_menu.addAction(quit_action)
-        
-        self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.activated.connect(self.tray_icon_activated)
-        self.tray_icon.show()
-
-    def apply_stylesheet(self):
-        self.setStyleSheet("""
-            QMainWindow, QWidget {
-                background-color: #F9F9F9;
-                color: #333333;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            
-            QSplitter::handle {
-                background-color: #E0E0E0;
-                width: 1px;
-            }
-            
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px;
-                font-weight: bold;
-            }
-            
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            
-            QPushButton:pressed {
-                background-color: #388E3C;
-            }
-            
-            QLabel {
-                color: #424242;
-            }
-            
-            QTextEdit, QLineEdit {
-                background-color: white;
-                border: 1px solid #E0E0E0;
-                border-radius: 5px;
-                padding: 5px;
-            }
-            
-            QTextEdit:focus, QLineEdit:focus {
-                border: 1px solid #4CAF50;
-            }
-        """)
-
-    def start_time_updater(self):
-        self.time_timer = QTimer(self)
-        self.time_timer.timeout.connect(self.update_time)
-        self.time_timer.start(1000)  # Update every second
-
-    def update_time(self):
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.time_label.setText(f"🕒 {current_time}")
-
-    def send_message(self):
-        user_input = self.input_field.text().strip()
-        if not user_input:
-            return
-            
-        # Clear input field
-        self.input_field.clear()
-        
-        # Add user message to chat
-        self.append_message("user", user_input)
-        
-        # 停止并清理之前的工作线程（如果存在）
-        self._ensure_single_worker()
-        
-        # Create and start worker thread
-        self.worker = WorkerThread(user_input, APIBridge, self) 
-        self.worker.result_ready.connect(self.handle_response)
-        self.worker.error_occurred.connect(self.handle_error)
-        self.worker.console_output_ready.connect(self.update_console_output)
-        self.worker.task_plan_ready.connect(self.update_task_plan)
-        self.worker.tool_usage_ready.connect(self.update_tool_status)
-        self.worker.loading_state_changed.connect(self.update_loading_state)
-        self.worker.user_input_needed.connect(self.handle_secondary_input_needed)
-        self.worker.start()
-
-    def append_message(self, role, content):
-        if role == "user":
-            # 用户消息使用绿色，字体大小14px
-            self.chat_display.append(f'<div style="color: #2E7D32; font-size: 14px;"><b>👤 You:</b> {content}</div>')
-        else:
-            # 助手消息使用蓝色，字体大小14px
-            html = markdown.markdown(content)
-            self.chat_display.append(f'<div style="color: #1976D2; font-size: 14px;"><b>🤖 Assistant:</b> {html}</div>')
-        self.chat_display.moveCursor(QTextCursor.End)
-
-    def handle_response(self, response):
-        self.append_message("assistant", response)
-
     def update_token_count(self, count):
         self.token_label.setText(f"🔢 Tokens: {count}")
 
@@ -1053,467 +1270,54 @@ class MainWindow(QMainWindow):
             self.tab_widget.setCurrentIndex(1)  # 控制台输出是第2个选项卡（索引为1）
         except Exception as e:
             self.log_error(f"更新控制台输出时出错: {str(e)}")
+            
+    def log_error(self, msg):
+        """安全地记录错误"""
+        print(f"ERROR: {msg}", file=sys.stderr)
+        # 也将错误发送到UI
+        try:
+            # 确保错误信息立即显示
+            QApplication.processEvents()
+        except Exception as e:
+            print(f"记录错误时出错: {str(e)}", file=sys.stderr)
+            
+    def handle_response(self, response):
+        self.append_message("assistant", response)
 
-    def handle_secondary_input_needed(self, prompt, timeout=60, error_message=None):
-        """处理需要用户二次输入的情况 - 由主线程调用"""
-        # 这个方法必须由主线程调用
-        # 可以通过信号从工作线程调用到主线程
-        
-        global last_confirmation_time
-        current_time = time.time()
-        
-        # 检查是否启用了防止过度确认功能，以及是否在冷却期内
-        if DISABLE_EXCESSIVE_CONFIRMATION and (current_time - last_confirmation_time < CONFIRMATION_COOLDOWN):
-            # 如果在冷却期内，自动返回继续执行的响应
-            self._current_input_result = "继续执行"
-            if self._current_input_event is not None:
-                def set_event():
-                    import asyncio
-                    asyncio.run_coroutine_threadsafe(self._set_event_async(), asyncio.get_event_loop())
-                QTimer.singleShot(0, set_event)
+    def append_message(self, role, content):
+        if role == "user":
+            # A user message using green, 14px font size
+            self.chat_display.append(f'<div style="color: #2E7D32; font-size: 14px;"><b>👤 You:</b> {content}</div>')
+        else:
+            # Assistant message using blue, 14px font size
+            html = markdown.markdown(content)
+            self.chat_display.append(f'<div style="color: #1976D2; font-size: 14px;"><b>🤖 Assistant:</b> {html}</div>')
+        self.chat_display.moveCursor(QTextCursor.End)
+
+    def send_message(self):
+        user_input = self.input_field.text().strip()
+        if not user_input:
             return
             
-        # 先将错误信息显示在控制台和聊天记录中
-        if error_message:
-            # 在控制台输出错误信息
-            error_formatted = f"\n⚠️ 任务执行出错: {error_message}\n"
-            cursor = self.console_output_tab.textCursor()
-            cursor.movePosition(QTextCursor.End)
-            
-            # 设置错误文本格式
-            format = QTextCharFormat()
-            format.setForeground(QColor("#D32F2F"))  # 红色
-            format.setFontWeight(QFont.Bold)
-            cursor.setCharFormat(format)
-            
-            # 插入文本
-            cursor.insertText(error_formatted)
-            
-            # 滚动到最新内容
-            self.console_output_tab.setTextCursor(cursor)
-            self.console_output_tab.ensureCursorVisible()
-            
-            # 强制立即更新UI
-            self.console_output_tab.repaint()
-            QApplication.processEvents()
-            
-            # 在聊天区域显示错误信息
-            self.chat_display.append(
-                f'<div style="color: #D32F2F; font-size: 14px; background-color: #FFEBEE; padding: 8px; border-left: 4px solid #D32F2F; margin: 5px 0;">'
-                f'<b>⚠️ 执行出错:</b> {error_message}</div>'
-            )
-            self.chat_display.repaint()
-            QApplication.processEvents()
-            
-            # 切换到控制台输出选项卡
-            self.tab_widget.setCurrentIndex(1)
-            
-            # 短暂延迟，让用户能看到错误信息
-            time.sleep(0.5)
-            
-        # 更新最后确认时间
-        last_confirmation_time = current_time
+        # Clear input field
+        self.input_field.clear()
         
-        self.secondary_input_needed = True
-        self.prompt = prompt
+        # Add user message to chat
+        self.append_message("user", user_input)
         
-        # 创建对话框并显示，传递错误信息
-        self.input_dialog = SecondaryInputDialog(prompt, parent=self, timeout=timeout, error_message=error_message)
-        self.input_dialog.input_received.connect(self.handle_secondary_input)
-        self.input_dialog.exec_()
-
-    def handle_secondary_input(self, input_text):
-        """处理二次输入结果 - 由主线程调用"""
-        self.secondary_input = input_text
-        self.secondary_input_needed = False
+        # 停止并清理之前的工作线程（如果存在）
+        self._ensure_single_worker()
         
-        # 如果有等待中的事件，设置结果并触发事件
-        if self._current_input_event is not None:
-            self._current_input_result = input_text
-            # 使用异步方法安全触发事件
-            def set_event():
-                import asyncio
-                asyncio.run_coroutine_threadsafe(self._set_event_async(), asyncio.get_event_loop())
-            
-            # 使用QMetaObject.invokeMethod确保在正确的线程上调用
-            QTimer.singleShot(0, set_event)
-        
-        # 清除对话框引用
-        self.input_dialog = None
-
-    async def _set_event_async(self):
-        """安全地设置事件"""
-        if self._current_input_event is not None:
-            self._current_input_event.set()
-            
-    def _ensure_single_worker(self):
-        """确保只有一个工作线程在运行"""
-        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
-            try:
-                print("检测到正在运行的工作线程，正在停止...")
-                self.worker.quit()
-                if not self.worker.wait(1000):  # 等待1秒
-                    print("强制终止工作线程")
-                    self.worker.terminate()
-                    self.worker.wait(1000)  # 再等待1秒确保终止
-            except Exception as e:
-                print(f"清理之前的线程时出错: {e}")
-                
-        # 重置事件和结果
-        self._current_input_event = None
-        self._current_input_result = None
-
-    def update_loading_state(self, state):
-        """更新加载状态，显示或隐藏加载动画"""
-        if state:
-            self.spinner.show()  # 显示加载动画
-            
-            # 如果状态栏右侧没有加载状态文本，则添加
-            if not hasattr(self, 'loading_label') or not self.loading_label:
-                self.loading_label = QLabel("正在处理请求... ")
-                self.loading_label.setStyleSheet("color: #FF9800; font-weight: bold;")
-                self.status_layout.addWidget(self.loading_label)
-        else:
-            self.spinner.hide()  # 隐藏加载动画
-            
-            # 隐藏加载状态文本
-            if hasattr(self, 'loading_label') and self.loading_label:
-                self.loading_label.hide()
-                self.status_layout.removeWidget(self.loading_label)
-                self.loading_label.deleteLater()
-                self.loading_label = None
-
-    def show_from_tray(self):
-        self.showNormal()
-        self.activateWindow()
-
-    def show_from_floating_ball(self):
-        self.showNormal()
-        self.activateWindow()
-        self.floating_ball.hide()
-
-    def tray_icon_activated(self, reason):
-        if reason == QSystemTrayIcon.Trigger:
-            self.show_from_tray()
-
-    def changeEvent(self, event):
-        if event.type() == event.WindowStateChange:
-            if self.windowState() & Qt.WindowMinimized:
-                self.hide()
-                self.floating_ball.show()
-                self.floating_ball.move(self.x(), self.y())
-
-    def closeEvent(self, event):
-        self.quit_application()
-
-    def quit_application(self):
-        # 在程序退出前确保所有线程正确结束
-        try:
-            if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
-                print("等待工作线程结束...")
-                self.worker.quit()
-                # 等待最多3秒
-                if not self.worker.wait(3000):
-                    print("强制终止工作线程")
-                    self.worker.terminate()
-            
-            # 使用 APIBridge 清理资源
-            APIBridge.cleanup()
-        except Exception as e:
-            print(f"清理线程时出错: {e}")
-        
-        QApplication.quit()
-
-    def load_help_content(self):
-        try:
-            with open("README.md", "r", encoding="utf-8") as f:
-                content = f.read()
-                html = markdown.markdown(content)
-                self.help_tab.setHtml(html)
-        except Exception as e:
-            self.help_tab.setPlainText(f"Error loading help content: {str(e)}")
-
-    def load_user_info(self):
-        try:
-            with open("user-information.txt", "r", encoding="utf-8") as f:
-                self.user_info_edit.setPlainText(f.read())
-        except Exception as e:
-            self.user_info_edit.setPlainText("")
-
-    def save_user_info(self):
-        try:
-            with open("user-information.txt", "w", encoding="utf-8") as f:
-                f.write(self.user_info_edit.toPlainText())
-            QMessageBox.information(self, "Success", "User information saved successfully!")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save user information: {str(e)}")
-
-    def save_settings(self):
-        try:
-            with open(".env", "w") as f:
-                f.write(f'api_key="{self.api_key_input.text()}"\n')
-                f.write(f'key="{self.weather_key_input.text()}"\n')
-                f.write(f'QQ_EMAIL="{self.email_input.text()}"\n')
-                f.write(f'AUTH_CODE="{self.auth_code_input.text()}"\n')
-            QMessageBox.information(self, "Success", "Settings saved successfully!")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save settings: {str(e)}")
-
-    def import_chat_history(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "Import Chat History", "", "JSON Files (*.json)")
-        if file_name:
-            try:
-                with open(file_name, "r", encoding="utf-8") as f:
-                    history = json.load(f)
-                    
-                    # 先清空当前消息历史
-                    self.messages_history.clear()
-                    
-                    # 添加导入的消息到历史
-                    for msg in history:
-                        self.messages_history.append(msg)
-                    
-                    # 更新界面显示
-                    self.chat_display.clear()
-                    for msg in history:
-                        if msg["role"] in ["user", "assistant"]:
-                            self.append_message(msg["role"], msg["content"])
-                    
-                    # 同步到后端 API 的消息历史
-                    from deepseekAPI import messages as api_messages
-                    api_messages.clear()
-                    for msg in history:
-                        api_messages.append(msg)
-                    
-                    # 更新 Token 计数
-                    token_count = num_tokens_from_messages(self.messages_history)
-                    if hasattr(self, 'token_label'):
-                        self.token_label.setText(f"🔢 Tokens: {token_count}")
-                        
-                QMessageBox.information(self, "Success", "聊天历史导入成功!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"导入聊天历史失败: {str(e)}")
-
-    def export_chat_history(self):
-        file_name, _ = QFileDialog.getSaveFileName(self, "Export Chat History", "", "JSON Files (*.json)")
-        if file_name:
-            try:
-                # 确保文件名以.json结尾
-                if not file_name.endswith('.json'):
-                    file_name += '.json'
-                
-                # 导出完整的对话历史
-                with open(file_name, "w", encoding="utf-8") as f:
-                    json.dump(list(self.messages_history), f, ensure_ascii=False, indent=2)
-                
-                QMessageBox.information(self, "Success", "聊天历史导出成功!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"导出聊天历史失败: {str(e)}")
-
-    def show_summary(self):
-        summary_dialog = QMessageBox(self)
-        summary_dialog.setWindowTitle("Task Summary")
-        summary_dialog.setText("\n".join(self.task_summary))
-        summary_dialog.exec_()
-
-    # Add a method to handle errors from the worker thread
-    def handle_error(self, error_msg):
-        """处理错误信息"""
-        # 记录错误
-        try:
-            with open("error_log.txt", "a", encoding="utf-8") as f:
-                f.write(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {error_msg}\n")
-        except Exception as e:
-            print(f"无法写入错误日志: {e}", file=sys.stderr)
-        
-        # 在聊天窗口显示错误
-        self.chat_display.append(
-            f'<div style="color: #D32F2F; font-size: 14px;">'
-            f'<b>⚠️ 错误:</b> {error_msg}</div>'
-        )
-        
-        # 在控制台输出窗口也显示错误
-        self.console_output_tab.append(
-            f'<div style="color: #D32F2F; background-color: #FFEBEE; padding: 5px; '
-            f'border-left: 4px solid #D32F2F; margin: 5px 0;">'
-            f'<b>执行错误:</b><br/>{error_msg}</div>'
-        )
-        
-        # 更新工具状态
-        self.update_tool_status("发生错误", "错误")
-        
-        # 隐藏加载动画
-        self.update_loading_state(False)
-
-class SecondaryInputDialog(QDialog):
-    """用户二次输入对话框，用于任务执行过程中需要用户确认或提供额外信息的场景"""
-    
-    # 定义输入接收信号
-    input_received = pyqtSignal(str)
-    
-    def __init__(self, prompt, parent=None, timeout=60, error_message=None):
-        super().__init__(parent)
-        self.setWindowTitle("需要用户输入")
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
-        self.resize(500, 300)  # 增加窗口大小以容纳错误信息
-        
-        # 设置主布局
-        layout = QVBoxLayout(self)
-        
-        # 如果有错误信息，先显示错误框
-        if error_message:
-            error_frame = QFrame()
-            error_frame.setStyleSheet("""
-                background-color: #FFEBEE;
-                border-left: 4px solid #D32F2F;
-                border-radius: 4px;
-                padding: 8px;
-                margin-bottom: 10px;
-            """)
-            error_layout = QVBoxLayout(error_frame)
-            
-            error_title = QLabel("⚠️ 执行出错")
-            error_title.setStyleSheet("color: #D32F2F; font-weight: bold; font-size: 14px;")
-            error_layout.addWidget(error_title)
-            
-            error_details = QLabel(error_message)
-            error_details.setWordWrap(True)
-            error_details.setStyleSheet("color: #555555;")
-            error_layout.addWidget(error_details)
-            
-            layout.addWidget(error_frame)
-        
-        # 添加提示信息标签
-        prompt_label = QLabel(prompt)
-        prompt_label.setWordWrap(True)
-        prompt_label.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
-        layout.addWidget(prompt_label)
-        
-        # 添加选项说明
-        options_label = QLabel("1. 继续尝试 (直接输入建议或按回车)\n2. 终止任务 (输入数字2或\"终止\")")
-        options_label.setStyleSheet("color: #0D47A1; font-weight: bold;")
-        layout.addWidget(options_label)
-        
-        # 添加输入框
-        self.input_field = QTextEdit()
-        self.input_field.setPlaceholderText("请输入您的选择或建议...")
-        self.input_field.setMinimumHeight(100)
-        layout.addWidget(self.input_field)
-        
-        # 添加按钮
-        button_layout = QHBoxLayout()
-        
-        # 继续按钮
-        self.continue_button = QPushButton("继续尝试")
-        self.continue_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        self.continue_button.clicked.connect(self.accept_input)
-        button_layout.addWidget(self.continue_button)
-        
-        # 终止按钮
-        self.terminate_button = QPushButton("终止任务")
-        self.terminate_button.setStyleSheet("""
-            QPushButton {
-                background-color: #F44336;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #D32F2F;
-            }
-        """)
-        self.terminate_button.clicked.connect(self.terminate_task)
-        button_layout.addWidget(self.terminate_button)
-        
-        layout.addLayout(button_layout)
-        
-        # 添加倒计时进度条
-        countdown_layout = QHBoxLayout()
-        countdown_label = QLabel(f"倒计时 {timeout} 秒:")
-        countdown_layout.addWidget(countdown_label)
-        
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, timeout)
-        self.progress_bar.setValue(timeout)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("%v 秒")
-        countdown_layout.addWidget(self.progress_bar)
-        
-        layout.addLayout(countdown_layout)
-        
-        # 设置倒计时定时器
-        self.timeout = timeout
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_countdown)
-        self.timer.start(1000)  # 每秒更新一次
-        
-        # 设置窗口样式
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #F9F9F9;
-                border: 1px solid #E0E0E0;
-                border-radius: 5px;
-            }
-            QLabel {
-                color: #424242;
-            }
-            QTextEdit {
-                background-color: white;
-                border: 1px solid #E0E0E0;
-                border-radius: 5px;
-                padding: 5px;
-            }
-        """)
-        
-        # 使窗口居中
-        if parent:
-            self.move(
-                parent.x() + parent.width() // 2 - self.width() // 2,
-                parent.y() + parent.height() // 2 - self.height() // 2
-            )
-    
-    def update_countdown(self):
-        """更新倒计时"""
-        current_value = self.progress_bar.value()
-        if current_value > 0:
-            self.progress_bar.setValue(current_value - 1)
-        else:
-            # 时间到，自动提交当前输入
-            self.timer.stop()
-            self.accept_input()
-    
-    def accept_input(self):
-        """接受用户输入并发送信号"""
-        self.timer.stop()
-        input_text = self.input_field.toPlainText().strip()
-        self.input_received.emit(input_text)
-        self.accept()
-    
-    def terminate_task(self):
-        """终止任务"""
-        self.timer.stop()
-        self.input_received.emit("2")  # 发送终止信号
-        self.accept()
-    
-    def closeEvent(self, event):
-        """处理对话框关闭事件"""
-        self.timer.stop()
-        self.input_received.emit("")  # 发送空字符串表示用户关闭了对话框
-        super().closeEvent(event)
+        # Create and start worker thread
+        self.worker = WorkerThread(user_input, APIBridge, self) 
+        self.worker.result_ready.connect(self.handle_response)
+        self.worker.error_occurred.connect(self.handle_error)
+        self.worker.console_output_ready.connect(self.update_console_output)
+        self.worker.task_plan_ready.connect(self.update_task_plan)
+        self.worker.tool_usage_ready.connect(self.update_tool_status)
+        self.worker.loading_state_changed.connect(self.update_loading_state)
+        self.worker.user_input_needed.connect(self.handle_secondary_input_needed)
+        self.worker.start()
 
 # 检查是否禁用过度确认
 DISABLE_EXCESSIVE_CONFIRMATION = os.getenv("DISABLE_EXCESSIVE_CONFIRMATION", "false").lower() == "true"
@@ -1525,15 +1329,71 @@ def main():
     # Load environment variables
     load_dotenv()
     
-    # Create QApplication instance
-    app = QApplication(sys.argv)
-    
-    # Create main window
-    window = MainWindow()
-    window.show()
-    
-    # Run application
-    sys.exit(app.exec_())
+    try:
+        # 设置异常处理器
+        def handle_exception(exc_type, exc_value, exc_traceback):
+            print("未捕获的异常:", exc_type, exc_value)
+            import traceback
+            traceback.print_exception(exc_type, exc_value, exc_traceback)
+            
+            # 保存错误到日志
+            try:
+                with open("error_log.txt", "a", encoding="utf-8") as f:
+                    f.write(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 未捕获的异常:\n")
+                    traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+            except:
+                pass
+            
+            # 如果GUI已经初始化，显示错误对话框
+            if 'app' in locals():
+                try:
+                    error_msg = str(exc_value)
+                    QMessageBox.critical(None, "错误", f"程序发生错误:\n{error_msg}\n\n请查看错误日志获取详细信息。")
+                except:
+                    pass
+        
+        # 设置全局异常处理器
+        sys.excepthook = handle_exception
+        
+        # 忽略特定的警告
+        warnings.filterwarnings("ignore", category=DeprecationWarning, module="sip")
+        
+        # Create QApplication instance
+        app = QApplication(sys.argv)
+        
+        # 设置应用程序信息
+        app.setApplicationName("DeepSeek PC Manager")
+        app.setApplicationVersion("1.0.0")
+        app.setOrganizationName("DeepSeek")
+        app.setOrganizationDomain("deepseek.com")
+        
+        # 设置默认字体
+        default_font = app.font()
+        default_font.setFamily("Microsoft YaHei UI")
+        app.setFont(default_font)
+        
+        # Create main window
+        window = MainWindow()
+        window.show()
+        
+        # Run application
+        sys.exit(app.exec_())
+    except Exception as e:
+        print(f"程序启动错误: {e}")
+        # 保存错误到日志文件
+        try:
+            with open("error_log.txt", "a", encoding="utf-8") as f:
+                import traceback
+                f.write(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 程序启动错误:\n")
+                f.write(traceback.format_exc())
+                f.write("\n")
+        except:
+            pass
+        
+        # 显示错误对话框
+        if 'app' in locals():
+            QMessageBox.critical(None, "启动错误", f"程序启动时出错:\n{e}\n请查看错误日志获取详细信息。")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main() 

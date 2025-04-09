@@ -11,4 +11,5 @@ pandas
 PyQt5>=5.15.0
 markdown>=3.3.0
 beautifulsoup4>=4.9.3
+html2text>=2020.0.0
 

@@ -51,6 +51,15 @@ if exist requirements.txt (
     exit /b 1
 )
 
+:: 确保安装html2text模块
+echo 正在安装html2text模块...
+pip install html2text
+if errorlevel 1 (
+    echo 安装html2text模块失败
+    pause
+    exit /b 1
+)
+
 :: 运行主程序
 echo 正在启动程序...
 python deepseek_gui.py
