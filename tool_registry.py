@@ -12,7 +12,24 @@ from code_search_enhanced import CodeSearchEngine
 from code_edit_enhanced import edit_code_section, edit_function, edit_code_by_pattern, insert_code
 from code_validator_enhanced import validate_python_code, verify_imports, execute_code_safely, check_complexity
 # 导入Web搜索工具
-from web_search_tool import web_search, fetch_webpage, filter_search_results
+from web_search_tool import web_search, ai_search, semantic_rerank
+# 导入code_tools模块中的所有工具函数
+from code_tools import (
+    write_code,
+    verify_code,
+    append_code,
+    read_code,
+    create_module,
+    analyze_code,
+    search_code_in_file,
+    locate_code_section,
+    get_code_context,
+    edit_code_section_by_line,
+    edit_function_in_file,
+    edit_code_by_regex,
+    insert_code_at_line,
+    check_code_complexity
+)
 
 # 初始化代码搜索引擎实例
 code_search_engine = CodeSearchEngine()
@@ -43,7 +60,7 @@ def get_tools():
                     "properties": {
                         "prompt": {
                             "type": "string",
-                            "description": "向用户展示的提示信息，会通过语音读出"
+                            "description": "向用户展示的提示信息"
                         },
                         "timeout": {
                             "type": "integer",
@@ -102,10 +119,10 @@ def get_tools():
                         },
                         "timeout": {
                             "type": "integer",
-                            "description": "命令执行的最大超时时间（秒），默认60秒。对于复杂或需要长时间运行的命令，应设置更长的超时时间"
+                            "description": "【必须设置】命令执行的最大超时时间（秒）。你必须根据命令的复杂性和可能的执行时间进行评估设置，禁止使用默认值。"
                         }
                     },
-                    "required": ["command"]
+                    "required": ["command", "timeout"]
                 }
             }
         },
@@ -123,10 +140,10 @@ def get_tools():
                         },
                         "timeout": {
                             "type": "integer",
-                            "description": "命令执行的最大超时时间（秒），默认60秒。对于复杂或需要长时间运行的命令，应设置更长的超时时间"
+                            "description": "【必须设置】命令执行的最大超时时间（秒）。你必须根据命令的复杂性和可能的执行时间进行评估设置，禁止使用默认值。"
                         }
                     },
-                    "required": ["command"]
+                    "required": ["command", "timeout"]
                 }
             }
         },
@@ -406,82 +423,8 @@ def get_tools():
         {
             "type": "function",
             "function": {
-                "name": "search_code",
-                "description": "【代码搜索增强工具】在代码文件中智能搜索特定内容，支持多种搜索模式（语义搜索、精确匹配、正则表达式等），帮助快速定位代码片段",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "要搜索的文件路径"
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "搜索关键词。应从用户问题中提取2-5个核心词组，去掉无关修饰词。例如用户问'如何解决Windows 10蓝屏死机问题'，应搜索'Windows 10 蓝屏 解决方法'而非整句。避免长句，使用术语和专业名词。"
-                        },
-                        "search_type": {
-                            "type": "string",
-                            "description": "搜索类型: semantic(语义搜索)、exact(精确匹配)、regex(正则表达式)、function(函数定义)、class(类定义)、import(导入语句)",
-                            "enum": ["semantic", "exact", "regex", "function", "class", "import"],
-                            "default": "semantic"
-                        },
-                        "num_results": {
-                            "type": "integer",
-                            "description": "返回结果数量，默认为5，最大为50"
-                        },
-                        "filter_adult": {
-                            "type": "boolean",
-                            "description": "是否过滤成人内容，默认为true"
-                        },
-                        "keywords": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            },
-                            "description": "可选的关键词列表，用于过滤搜索结果。当提供时，只返回包含这些关键词的结果。"
-                        },
-                        "sort_by_relevance": {
-                            "type": "boolean",
-                            "description": "是否按相关性排序结果，默认为true"
-                        },
-                        "match_all_keywords": {
-                            "type": "boolean",
-                            "description": "是否要求匹配所有关键词，默认为false（匹配任意关键词即可）"
-                        }
-                    },
-                    "required": ["file_path", "query"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "fetch_webpage",
-                "description": "【Web内容获取工具】抓取和分析指定URL的网页内容。此工具特别适用于：1) 查看搜索结果中特定网页的完整内容；2) 获取文章、教程或文档的详细信息；3) 提取网页中与用户问题最相关的关键部分",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "网页URL，必须以http://或https://开头"
-                        },
-                        "extract_keywords": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            },
-                            "description": "用于智能提取网页关键句子的词列表。应选择能精确定位用户所需信息的专业术语和核心名词，避免使用常见动词或形容词。例如，查询'Python异步编程教程'，应使用['asyncio', 'coroutine', '异步', '协程']等专业术语作为提取关键词"
-                        }
-                    },
-                    "required": ["url"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
                 "name": "web_search",
-                "description": "【Web搜索工具】通过搜索引擎查询信息。请注意：1) 不要直接复制用户的原始问题作为查询词；2) 应提取核心关键词并重新组织为精简的搜索关键词；3) 移除不必要的限定词、连词和虚词；4) 使用专业术语替代通用描述；5) 优先使用中文关键词进行搜索；6) 必要时将长句拆分为多个关键词组合",
+                "description": "【Web搜索工具】通过博查API搜索引擎查询信息。使用限制：1) 仅当其他工具无法解决问题时使用；2) 优先使用本地代码搜索和文件操作工具；3) 不要直接复制用户的原始问题作为查询词；4) 应提取核心关键词并重新组织为精简的搜索关键词；5) 移除不必要的限定词、连词和虚词；6) 使用专业术语替代通用描述；7) 优先使用中文关键词进行搜索；8) 必要时将长句拆分为多个关键词组合",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -495,7 +438,7 @@ def get_tools():
                         },
                         "filter_adult": {
                             "type": "boolean",
-                            "description": "是否过滤成人内容，默认为true"
+                            "description": "是否过滤成人内容，默认为false"
                         },
                         "keywords": {
                             "type": "array",
@@ -520,31 +463,313 @@ def get_tools():
         {
             "type": "function",
             "function": {
-                "name": "filter_search_results",
-                "description": "【搜索结果筛选工具】根据精炼关键词从现有搜索结果中智能筛选最相关信息。此工具应在web_search返回大量结果后使用，通过精确的关键词提取用户真正需要的信息",
+                "name": "ai_search",
+                "description": "【AI搜索增强工具】通过博查AI Search API进行高级搜索，功能包括：1)返回网页结果(最多50条)；2)获取并保存图片(如人物、产品、场景等)；3)提供多种模态卡片(包括天气、百科、医疗、万年历、火车、星座、贵金属、汇率、油价、手机、股票、汽车等垂直领域结构化数据)；4)生成AI回答和延伸问题。比普通web_search能获取更丰富、更智能的搜索体验，并能将图片和模态卡保存到本地文件夹供后续使用。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "type": "object"
-                            },
-                            "description": "搜索结果列表，通常是web_search函数返回的results字段"
+                        "query": {
+                            "type": "string",
+                            "description": "搜索关键词。可以是一般查询(如'Windows蓝屏问题')，也可以是针对特定图片('奥迪RS7高清图片')或特定模态卡('上海天气'、'比特币汇率')的查询。针对垂直领域使用更精确的词汇能够获得更好的结构化数据。"
                         },
-                        "keywords": {
+                        "num_results": {
+                            "type": "integer",
+                            "description": "返回结果数量，默认为5，最大为50。对于图片和模态卡，建议使用较小值如3-5"
+                        },
+                        "filter_adult": {
+                            "type": "boolean",
+                            "description": "是否过滤成人内容，默认为false"
+                        },
+                        "answer": {
+                            "type": "boolean",
+                            "description": "是否生成AI回答，默认为false。当需要AI进行总结或分析时设为true"
+                        },
+                        "stream": {
+                            "type": "boolean",
+                            "description": "是否使用流式输出，默认为false。流式输出适合长回答，但不影响模态卡和图片的获取"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "semantic_rerank",
+                "description": "【语义排序工具】使用博查Semantic Reranker对文档列表进行语义相关性排序，根据用户查询智能对文档进行重新排序，确保最相关的内容排在前面。适用于需要对大量文本内容按相关性排序的场景。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "查询字符串，用于评估文档相关性的基准"
+                        },
+                        "documents": {
                             "type": "array",
                             "items": {
                                 "type": "string"
                             },
-                            "description": "筛选关键词列表。应选择用户问题中最具区分性的术语和名词，避免使用通用词。关键词应简短精确，每个词1-3个字为宜。例如，对于'如何解决最新版Windows系统的蓝屏问题'，应使用['最新版', 'Windows', '蓝屏']而非['如何', '解决', '问题']"
+                            "description": "要排序的文档列表，每个文档应为字符串"
                         },
-                        "match_all": {
-                            "type": "boolean",
-                            "description": "是否要求匹配所有关键词，默认为false（匹配任意关键词即可）"
+                        "model": {
+                            "type": "string",
+                            "description": "使用的排序模型，默认为'gte-rerank'"
+                        },
+                        "top_n": {
+                            "type": "integer",
+                            "description": "返回排名前n的结果，默认返回所有结果"
                         }
                     },
-                    "required": ["results", "keywords"]
+                    "required": ["query", "documents"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "analyze_code",
+                "description": "【代码分析工具】分析代码文件的结构和质量，提供详细的代码质量报告、复杂度分析和潜在问题识别",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "代码文件路径"
+                        }
+                    },
+                    "required": ["file_path"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_code_in_file",
+                "description": "【代码搜索工具】在指定文件中搜索代码，支持多种搜索模式，包括语义搜索、精确匹配、正则表达式等",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "要搜索的文件路径"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "搜索查询内容"
+                        },
+                        "search_type": {
+                            "type": "string",
+                            "description": "搜索类型，可选：'semantic'(语义)、'exact'(精确)、'regex'(正则)、'function'(函数)、'class'(类)、'import'(导入)",
+                            "enum": ["semantic", "exact", "regex", "function", "class", "import"],
+                            "default": "semantic"
+                        }
+                    },
+                    "required": ["file_path", "query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "locate_code_section",
+                "description": "【代码定位工具】定位并提取代码文件中的特定行范围，获取代码上下文信息",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "文件路径"
+                        },
+                        "start_line": {
+                            "type": "integer",
+                            "description": "起始行号"
+                        },
+                        "end_line": {
+                            "type": "integer",
+                            "description": "结束行号"
+                        }
+                    },
+                    "required": ["file_path", "start_line", "end_line"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_code_context",
+                "description": "【代码上下文工具】获取代码文件中特定行的上下文，查看代码的周围环境",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "文件路径"
+                        },
+                        "line_number": {
+                            "type": "integer",
+                            "description": "目标行号"
+                        },
+                        "context_lines": {
+                            "type": "integer",
+                            "description": "上下文的行数（默认5行）",
+                            "default": 5
+                        }
+                    },
+                    "required": ["file_path", "line_number"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "edit_code_section_by_line",
+                "description": "【代码编辑工具】编辑特定文件中指定行范围的代码，自动创建备份并验证编辑后的代码质量",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "要编辑的文件路径"
+                        },
+                        "start_line": {
+                            "type": "integer",
+                            "description": "起始行号"
+                        },
+                        "end_line": {
+                            "type": "integer",
+                            "description": "结束行号"
+                        },
+                        "new_code": {
+                            "type": "string",
+                            "description": "新代码内容"
+                        }
+                    },
+                    "required": ["file_path", "start_line", "end_line", "new_code"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "edit_function_in_file",
+                "description": "【函数编辑工具】编辑特定文件中的指定函数，自动定位函数边界并替换函数代码",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "要编辑的文件路径"
+                        },
+                        "function_name": {
+                            "type": "string",
+                            "description": "要编辑的函数名"
+                        },
+                        "new_code": {
+                            "type": "string",
+                            "description": "新函数代码"
+                        }
+                    },
+                    "required": ["file_path", "function_name", "new_code"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "edit_code_by_regex",
+                "description": "【正则替换工具】使用正则表达式模式编辑代码，进行批量替换操作",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "要编辑的文件路径"
+                        },
+                        "pattern": {
+                            "type": "string",
+                            "description": "正则表达式模式"
+                        },
+                        "replacement": {
+                            "type": "string",
+                            "description": "替换内容"
+                        }
+                    },
+                    "required": ["file_path", "pattern", "replacement"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "insert_code_at_line",
+                "description": "【代码插入工具】在特定行插入代码，不覆盖现有内容",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "要编辑的文件路径"
+                        },
+                        "line_number": {
+                            "type": "integer",
+                            "description": "插入位置的行号"
+                        },
+                        "code": {
+                            "type": "string",
+                            "description": "要插入的代码"
+                        }
+                    },
+                    "required": ["file_path", "line_number", "code"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "check_code_complexity",
+                "description": "【代码复杂度分析工具】分析代码复杂度和质量指标，包括圈复杂度、代码行数、注释比例等",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "description": "要分析的Python代码"
+                        }
+                    },
+                    "required": ["code"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_code",
+                "description": "【代码搜索工具】使用代码搜索引擎在整个代码库中搜索代码，支持语义搜索和关键词匹配",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "搜索查询字符串"
+                        },
+                        "search_type": {
+                            "type": "string",
+                            "description": "搜索类型，可选：'semantic'(语义)、'keyword'(关键词)",
+                            "enum": ["semantic", "keyword"],
+                            "default": "semantic"
+                        },
+                        "file_extensions": {
+                            "type": "string",
+                            "description": "要搜索的文件扩展名，用逗号分隔，例如：'.py,.js,.java'",
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "返回的最大结果数量",
+                            "default": 5
+                        }
+                    },
+                    "required": ["query"]
                 }
             }
         }

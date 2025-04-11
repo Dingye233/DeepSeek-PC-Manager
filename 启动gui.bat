@@ -60,14 +60,25 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: 运行主程序
+:: 直接启动GUI程序并捕获错误
 echo 正在启动程序...
-python deepseek_gui.py
-if errorlevel 1 (
-    echo 程序启动失败
-    pause
-    exit /b 1
-)
+start "" venv\Scripts\pythonw.exe deepseek_gui.py
 
-:: 如果程序正常退出，则暂停显示结果
-pause 
+:: 创建监视器脚本，检查程序是否正常运行
+echo @echo off > monitor.bat
+echo :check >> monitor.bat
+echo timeout /t 60 /nobreak > nul >> monitor.bat
+echo tasklist /FI "IMAGENAME eq pythonw.exe" /FO CSV | find /C "pythonw.exe" > temp.txt >> monitor.bat
+echo set /p count= < temp.txt >> monitor.bat
+echo del temp.txt >> monitor.bat
+echo if %%count%% equ 0 ( >> monitor.bat
+echo   echo 程序已结束运行，自动重启... >> monitor.bat
+echo   start "" venv\Scripts\pythonw.exe deepseek_gui.py >> monitor.bat
+echo ) >> monitor.bat
+echo goto check >> monitor.bat
+
+:: 在后台启动监视器
+start /min monitor.bat
+
+echo 程序已启动，此窗口可以关闭
+exit /b 0 

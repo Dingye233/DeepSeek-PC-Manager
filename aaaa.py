@@ -26,12 +26,13 @@ from message_utils import num_tokens_from_messages, clean_message_history, clear
 from console_utils import print_color, print_success, print_error, print_warning, print_info, print_highlight
 from system_utils import powershell_command, cmd_command
 # 导入代码搜索工具函数
-from code_search_tools import search_code, locate_code_section, get_code_context
+from code_tools import search_code_in_file as search_code
+from code_tools import locate_code_section, get_code_context
 # 导入增强版工具
 from code_edit_enhanced import edit_code_section, edit_function, edit_code_by_pattern, insert_code
 from code_validator_enhanced import validate_python_code, verify_imports, execute_code_safely, check_complexity
 # 导入Web搜索工具
-from web_search_tool import web_search, fetch_webpage, filter_search_results
+from web_search_tool import web_search, ai_search, semantic_rerank
 import concurrent.futures
 import sys
 import threading
@@ -341,13 +342,6 @@ async def execute_task_with_planning(user_input, messages_history):
                                     "content": "系统默认继续尝试。请采用全新思路寻找解决方案。"
                                 })
                                 
-                                # 发送默认决策消息到GUI
-                                if 'message_queue' in globals():
-                                    message_queue.put({
-                                        "type": "tool_result",
-                                        "text": "用户输入超时，系统默认继续尝试"
-                                    })
-                                
                                 return False, False  # 不终止任务，不失败
                             
                             if user_choice and user_choice.strip().lower() not in ["2", "终止", "停止", "结束", "放弃", "取消", "quit", "exit", "stop", "terminate", "cancel"]:
@@ -364,13 +358,6 @@ async def execute_task_with_planning(user_input, messages_history):
                                     "content": f"用户希望继续尝试解决问题，并提供了以下反馈/建议：\n\"{user_choice}\"\n\n请考虑用户的输入，采用合适的方法继续解决问题。可以尝试新思路或按用户建议调整方案。直接开始执行，无需解释。"
                                 })
                                 
-                                # 发送继续尝试的消息到GUI
-                                if 'message_queue' in globals():
-                                    message_queue.put({
-                                        "type": "tool_result",
-                                        "text": f"收到用户反馈: {user_choice}"
-                                    })
-                                
                                 return False, False  # 不终止任务，不失败
                             else:
                                 # 用户确认终止
@@ -385,13 +372,7 @@ async def execute_task_with_planning(user_input, messages_history):
                                 "role": "user", 
                                 "content": "系统检测到输入被取消，默认继续尝试。请采用全新思路寻找解决方案。"
                             })
-                            
-                            # 发送默认决策消息到GUI
-                            if 'message_queue' in globals():
-                                message_queue.put({
-                                    "type": "tool_result",
-                                    "text": "输入被取消，系统默认继续尝试"
-                                })
+                                
                             
                             return False, False  # 不终止任务，不失败
                             
@@ -404,13 +385,6 @@ async def execute_task_with_planning(user_input, messages_history):
                             "role": "user", 
                             "content": "系统默认继续尝试。请采用全新思路寻找解决方案。"
                         })
-                        
-                        # 发送到GUI
-                        if 'message_queue' in globals():
-                            message_queue.put({
-                                "type": "tool_result",
-                                "text": "用户输入处理出错，系统默认继续尝试"
-                            })
                         
                         return False, False  # 不终止任务，不失败
                 
@@ -464,6 +438,13 @@ async def execute_task_with_planning(user_input, messages_history):
                         tool_calls = message_data.tool_calls
                         tool_outputs = []
                         step_success = True
+                        
+                        # 打印工具调用检测信息
+                        print_info(f"\n===== 检测到工具调用 =====")
+                        print_info(f"工具调用数量: {len(tool_calls)}")
+                        for i, tc in enumerate(tool_calls):
+                            print_info(f"工具 {i+1}: {tc.function.name}")
+                        print_info("============================\n")
                         
                         # 添加助手消息和工具调用
                         current_execution_messages.append({
@@ -562,6 +543,69 @@ async def execute_task_with_planning(user_input, messages_history):
                                     error_message = f"工具 '{func_name}' 已被废弃，请使用 'powershell_command' 工具执行 'Get-ChildItem' 命令或 'cmd_command' 工具执行 'dir' 命令来列出目录内容。"
                                     print_warning(error_message)
                                     result = error_message
+                                elif func_name == "web_search":
+                                    query = args.get("query", "")
+                                    num_results = args.get("num_results", 5)
+                                    filter_adult = args.get("filter_adult", True)
+                                    keywords = args.get("keywords", None)
+                                    sort_by_relevance = args.get("sort_by_relevance", True)
+                                    match_all_keywords = args.get("match_all_keywords", False)
+                                    result = json.dumps(web_search(query, num_results, filter_adult, keywords, sort_by_relevance, match_all_keywords), ensure_ascii=False)
+                                elif func_name == "ai_search":
+                                    query = args.get("query", "")
+                                    num_results = args.get("num_results", 5)
+                                    filter_adult = args.get("filter_adult", True)
+                                    answer = args.get("answer", True)
+                                    stream = args.get("stream", False)
+                                    
+                                    try:
+                                        print_info(f"执行博查AI搜索: {query}")
+                                        search_result = ai_search(query, num_results, filter_adult, answer, stream)
+                                        
+                                        # 检查是否为字符串结果，如果是，直接返回
+                                        if isinstance(search_result, str):
+                                            result = search_result
+                                        else:
+                                            # 检查结果大小，如果太大，可能导致内存问题
+                                            result_str = json.dumps(search_result, ensure_ascii=False)
+                                            if len(result_str) > 1000000:  # 超过1MB的结果
+                                                print_warning(f"AI搜索结果过大 ({len(result_str)/1000000:.2f}MB)，进行精简处理")
+                                                # 精简结果，移除原始响应
+                                                if "original_response" in search_result:
+                                                    del search_result["original_response"]
+                                                # 限制模态卡数量
+                                                if "modal_cards" in search_result and len(search_result["modal_cards"]) > 3:
+                                                    search_result["modal_cards"] = search_result["modal_cards"][:3]
+                                                    search_result["modal_cards"].append({"type": "note", "data": {"message": "更多模态卡被省略以减小响应大小"}})
+                                        
+                                        result = json.dumps(search_result, ensure_ascii=False)
+                                    except Exception as e:
+                                        error_msg = f"博查AI搜索执行出错: {str(e)}"
+                                        print_error(error_msg)
+                                        result = json.dumps({
+                                            "status": "error",
+                                            "error": error_msg,
+                                            "message": "博查AI搜索失败，请稍后再试"
+                                        }, ensure_ascii=False)
+                                
+                                elif func_name == "semantic_rerank":
+                                    query = args.get("query", "")
+                                    documents = args.get("documents", [])
+                                    model = args.get("model", "gte-rerank")
+                                    top_n = args.get("top_n", None)
+                                    
+                                    try:
+                                        print_info(f"执行语义排序，共{len(documents)}个文档")
+                                        result = json.dumps(semantic_rerank(query, documents, model, top_n), ensure_ascii=False)
+                                    except Exception as e:
+                                        error_msg = f"语义排序执行出错: {str(e)}"
+                                        print_error(error_msg)
+                                        result = json.dumps({
+                                            "status": "error",
+                                            "error": error_msg,
+                                            "message": "语义排序失败，请检查文档格式"
+                                        }, ensure_ascii=False)
+                                
                                 else:
                                     raise ValueError(f"未定义的工具调用: {func_name}")
                                 
@@ -603,6 +647,12 @@ async def execute_task_with_planning(user_input, messages_history):
                                     
                                     current_execution_messages.append({"role": "user", "content": completion_check_prompt})
                                     
+                                    # 添加系统消息确保检测工具调用
+                                    current_execution_messages.append({
+                                        "role": "system", 
+                                        "content": "请认真检查对话历史中的所有工具调用，确认是否有工具被成功执行。如果有工具执行成功，即使任务尚未完成，也应标记为[继续]而非[失败]。"
+                                    })
+                                    
                                     completion_check_response = client.chat.completions.create(
                                         model="deepseek-chat",
                                         messages=current_execution_messages,
@@ -618,39 +668,114 @@ async def execute_task_with_planning(user_input, messages_history):
                                     
                                     # 如果模型确认任务已完成，生成总结并返回
                                     if "[任务已完成]" in completion_check:
-                                        print_success("\n任务已确认完成")
-                                        is_task_complete = True
-                                        task_completed = True
+                                        print_info("\n⏳ 正在进行任务完成验证...")
                                         
-                                        # 生成简单总结
-                                        summary_start = completion_check.find("[任务已完成]") + len("[任务已完成]")
-                                        summary = completion_check[summary_start:].strip()
+                                        # 添加反向验证步骤，确保任务真正完成
+                                        verification_prompt = """
+                                        系统检测到任务可能已完成，但需要进行深度验证以确保任务确实完成。
                                         
-                                        # 如果摘要为空或过短，请求一个更详细的摘要
-                                        if len(summary) < 10:
-                                            summary_prompt = "任务已完成。请简洁总结执行结果（不超过50字）"
-                                            current_execution_messages.append({"role": "user", "content": summary_prompt})
+                                        请进行以下验证：
+                                        1. 检查原始任务要求中的每个具体目标是否都已实现
+                                        2. 对于每个目标，提供具体的工具调用证据（哪个工具、何时调用、结果如何）
+                                        3. 确认所有必要的文件操作是否都已成功执行（创建、修改、保存等）
+                                        4. 检查是否有任何步骤仅声明了但实际未执行
+                                        5. 验证最终产出物是否已正确生成并可访问
+                                        
+                                        如果确认任务已真正完成，请回复：[验证通过] + 简短的完成证据
+                                        如果发现任务实际上未完成，请回复：[验证未通过] + 未完成的部分
+                                        """
+                                        
+                                        # 添加系统消息强调诚实评估
+                                        current_execution_messages.append({
+                                            "role": "system", 
+                                            "content": "在这次验证中，请保持完全的客观和诚实。如果任务有任何未完成的部分，哪怕是微小的部分，都必须标记为[验证未通过]。避免任何虚假正面评价。"
+                                        })
+                                        
+                                        current_execution_messages.append({"role": "user", "content": verification_prompt})
+                                        
+                                        # 获取验证结果
+                                        deep_verification_response = client.chat.completions.create(
+                                            model="deepseek-chat",
+                                            messages=current_execution_messages,
+                                            temperature=0.1,
+                                            max_tokens=800
+                                        )
+                                        
+                                        verification_result = deep_verification_response.choices[0].message.content
+                                        current_execution_messages.append({"role": "assistant", "content": verification_result})
+                                        
+                                        print_info("\n===== 任务完成验证 =====")
+                                        print(verification_result)
+                                        print_info("===========================\n")
+                                        
+                                        # 如果验证未通过，继续执行任务
+                                        if "[验证未通过]" in verification_result:
+                                            print_info("\n⚠️ 任务验证未通过，继续执行...")
                                             
-                                            summary_response = client.chat.completions.create(
-                                                model="deepseek-chat",
-                                                messages=current_execution_messages,
-                                                temperature=0.2,
-                                                max_tokens=50
-                                            )
+                                            # 提取未完成部分
+                                            incomplete_start = verification_result.find("[验证未通过]") + len("[验证未通过]")
+                                            incomplete_parts = verification_result[incomplete_start:].strip()
                                             
-                                            summary = summary_response.choices[0].message.content
-                                            current_execution_messages.append({"role": "assistant", "content": summary})
+                                            # 将任务标记为未完成，并继续执行
+                                            is_task_complete = False
+                                            
+                                            # 添加继续执行的提示
+                                            current_execution_messages.append({
+                                                "role": "user", 
+                                                "content": f"任务验证未通过，需要继续完成以下部分：\n{incomplete_parts}\n\n请继续执行任务，完成这些未完成的部分。"
+                                            })
+                                            
+                                            # 继续循环
+                                            continue
                                         
-                                        print_success(f"\n✅ {summary}")
+                                        # 只有验证通过，才真正确认任务完成
+                                        if "[验证通过]" in verification_result:
+                                            print_success("\n✅ 任务已完成并通过验证!")
+                                            is_task_complete = True
+                                            task_completed = True
+                                            
+                                            # 生成简单总结
+                                            summary_start = completion_check.find("[任务已完成]") + len("[任务已完成]")
+                                            summary = completion_check[summary_start:].strip()
+                                            
+                                            # 如果摘要为空或过短，提取验证结果中的信息
+                                            if len(summary) < 10:
+                                                evidence_start = verification_result.find("[验证通过]") + len("[验证通过]")
+                                                evidence = verification_result[evidence_start:].strip()
+                                                
+                                                summary_prompt = f"任务已完成并通过验证。请基于以下验证证据，简洁总结执行结果（不超过50字）：\n{evidence}"
+                                                current_execution_messages.append({"role": "user", "content": summary_prompt})
+                                                
+                                                summary_response = client.chat.completions.create(
+                                                    model="deepseek-chat",
+                                                    messages=current_execution_messages,
+                                                    temperature=0.2,
+                                                    max_tokens=50
+                                                )
+                                                
+                                                summary = summary_response.choices[0].message.content
+                                                current_execution_messages.append({"role": "assistant", "content": summary})
+                                            
+                                            print_success(f"\n✅ {summary}")
+                                            
+                                            # 更新主对话消息
+                                            messages_history.append({"role": "user", "content": user_input})
+                                            messages_history.append({"role": "assistant", "content": summary})
+                                            
+                                            # 播放结果语音
+                                            await text_to_speech(summary)
+                                            
+                                            return summary
                                         
-                                        # 更新主对话消息
-                                        messages_history.append({"role": "user", "content": user_input})
-                                        messages_history.append({"role": "assistant", "content": summary})
+                                        # 如果既没有验证通过也没有验证未通过，继续执行任务
+                                        print_info("\n⚠️ 验证结果不明确，继续执行任务...")
+                                        is_task_complete = False
                                         
-                                        # 播放结果语音
-                                        await text_to_speech(summary)
-                                        
-                                        return summary
+                                        current_execution_messages.append({
+                                            "role": "user", 
+                                            "content": "验证结果不明确，请继续执行任务直到确认所有目标都已完成。"
+                                        })
+                                        continue
                                 
                                 # 分析执行结果是否有错误
                                 error_info = task_error_analysis(result, {"tool": func_name, "args": args})
@@ -675,6 +800,12 @@ async def execute_task_with_planning(user_input, messages_history):
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
                                 "content": str(result)[:8000]  # 限制结果长度
+                            })
+                            
+                            # 添加系统消息确保模型注意到工具执行
+                            current_execution_messages.append({
+                                "role": "system",
+                                "content": f"工具 {func_name} 已成功执行。请在评估任务状态时考虑此工具的执行结果。如有工具被执行，即使任务未完成，也应标记为[继续]而非[失败]。"
                             })
                             
                             tool_outputs.append({
@@ -710,14 +841,20 @@ async def execute_task_with_planning(user_input, messages_history):
                         
                         current_execution_messages.append({"role": "user", "content": verify_prompt})
                         
+                        # 添加系统消息确保检测工具调用
+                        current_execution_messages.append({
+                            "role": "system", 
+                            "content": "请认真检查对话历史中的所有工具调用，确认是否有工具被成功执行。如果有工具执行成功，即使任务尚未完成，也应标记为[继续]而非[失败]。"
+                        })
+                        
                         # 调用验证
-                        verify_response = client.chat.completions.create(
+                        verification_response = client.chat.completions.create(
                             model="deepseek-chat",
                             messages=current_execution_messages,
                             temperature=0.1
                         )
                         
-                        verify_result = verify_response.choices[0].message.content
+                        verify_result = verification_response.choices[0].message.content
                         print_info("\n===== 任务进展评估 =====")
                         print(verify_result)
                         print_info("=========================\n")
@@ -876,56 +1013,11 @@ async def execute_task_with_planning(user_input, messages_history):
                                     print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
                                     break
                                 else:
-                                    continue  # 用户选择继续尝试
-                            else:
-                                # 继续尝试，不标记为失败
-                                print_info("\n🔄 继续尝试执行任务...")
-                                # 不中断循环，让智能体再次尝试
-                        
-                        # 备用检查 - 基于文本内容判断
-                        if "任务已完成" in verify_result or "任务完成" in verify_result:
-                            is_task_complete = True
-                            task_completed = True
-                            print_success("\n✅ 任务已完成! 准备生成总结...")
-                            break
-                        elif ("任务失败" in verify_result and "明确" in verify_result) or ("完全无法" in verify_result and "解决方案" not in verify_result):
-                            # 更严格的失败条件判断，必须明确表示完全无法继续
-                            confirm_prompt = """
-                            系统检测到你可能要放弃任务。在最终放弃前，请再次尝试思考：
-
-                            1. 是否尝试了所有可能的解决方案？
-                            2. 是否有替代方法可以达到类似效果？
-                            3. 能否部分完成任务而非完全放弃？
-
-                            如果重新思考后确实无法完成，请明确回复"确认任务无法完成"
-                            否则，请继续尝试执行任务，寻找新的解决方案。
-                            """
-                            current_execution_messages.append({"role": "user", "content": confirm_prompt})
-                            
-                            # 获取确认响应
-                            confirm_response = client.chat.completions.create(
-                                model="deepseek-chat",
-                                messages=current_execution_messages,
-                                temperature=0.1
-                            )
-                            
-                            confirm_result = confirm_response.choices[0].message.content
-                            current_execution_messages.append({"role": "assistant", "content": confirm_result})
-                            
-                            print_info("\n===== 失败确认 =====")
-                            print(confirm_result)
-                            print_info("======================\n")
-                            
-                            # 只有在明确确认失败的情况下才标记为失败
-                            if "确认任务无法完成" in confirm_result:
-                                # 询问用户是否继续尝试
-                                should_complete, should_fail = await ask_user_to_continue(current_execution_messages)
-                                if should_complete:
-                                    is_task_complete = True  # 虽然失败但任务结束
-                                    task_failed = True
-                                    print_warning("\n⚠️ 任务确认失败! 准备生成失败分析...")
-                                    break
-                                else:
+                                    # 添加系统消息确保正确检测工具状态
+                                    current_execution_messages.append({
+                                        "role": "system", 
+                                        "content": "任务将继续执行，请忽略之前的失败状态。系统检测到已有工具被成功执行，应将任务标记为[继续]而非[失败]。"
+                                    })
                                     continue  # 用户选择继续尝试
                         elif "部分完成" in verify_result and "100%" not in verify_result:
                             # 任务部分完成但达到了可接受的状态
@@ -1194,7 +1286,7 @@ async def main(input_message: str):
         messages.append({"role": "user", "content": input_message})
         
         # 计算token数量
-    token_count = num_tokens_from_messages(messages)
+        token_count = num_tokens_from_messages(messages)
         print_info(f"当前token数量: {token_count}")
         
         # 如果接近token限制，清理消息历史
@@ -1275,7 +1367,7 @@ def cleanup_thread_pools():
                     module.executor.shutdown(wait=False)
                 except:
                     pass
-                    except Exception as e:
+    except Exception as e:
         print_error(f"清理线程池时出错: {str(e)}")
     
     print_info("资源清理完成")
@@ -1330,7 +1422,7 @@ def recognize_speech(timeout=10):
             except:
                 print_error("备选语音识别也失败了")
                 return None
-                    except Exception as e:
+    except Exception as e:
         print_error(f"语音识别出错: {str(e)}")
         return None
 
@@ -1342,7 +1434,7 @@ if __name__ == "__main__":
     def cleanup_resources():
         """清理程序资源，确保线程池正确关闭"""
         print("\n正在清理资源...")
-                cleanup_thread_pools()
+        cleanup_thread_pools()
         print("资源清理完成")
     
     import atexit

@@ -7,6 +7,8 @@ import uuid
 import json
 from console_utils import print_color, print_success, print_error, print_warning, print_info
 from openai import OpenAI
+import threading
+import msvcrt
 
 # 读取用户信息
 def user_information_read() -> str:
@@ -80,6 +82,12 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
     # 获取系统默认编码
     system_encoding = locale.getpreferredencoding()
     
+    # 检查是否包含--dry-run参数
+    is_dry_run = False
+    if "--dry-run" in command or "-n" in command:
+        is_dry_run = True
+        print_info("检测到--dry-run参数，将以预览模式执行命令")
+    
     # 命令开始执行时间
     start_time = time.time()
 
@@ -99,7 +107,21 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
     client = None
 
     # 设置PowerShell使用UTF-8输出
-    utf8_command = "$OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; chcp 65001 | Out-Null; " + command
+    utf8_command = "$OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; chcp 65001 | Out-Null; "
+    
+    # 处理dry-run模式
+    if is_dry_run:
+        # 修改命令，添加-WhatIf参数（如果支持）或只打印命令而不执行
+        if "Remove-Item" in command or "Set-Item" in command or "New-Item" in command:
+            # 这些命令支持-WhatIf
+            if "-WhatIf" not in command:
+                command = command.replace(command.split()[0], command.split()[0] + " -WhatIf")
+        elif "Start-Process" in command or "Invoke-Expression" in command:
+            # 对可能危险的命令，打印但不执行
+            return f"[干运行模式] 将执行以下命令（但实际未执行）:\n{command}\n\n这是预览模式，未实际执行命令。"
+    
+    # 合并命令
+    utf8_command += command
 
     # 修改进程创建方式，确保使用UTF-8编码
     proc = await asyncio.create_subprocess_exec(
@@ -118,7 +140,7 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
     
     last_output_time = time.time()  # 记录最后一次有输出的时间
     
-    max_console_output = 500  # 限制控制台输出的最大字符数
+    max_console_output = 5000  # 增加控制台输出的最大字符数，提高控制台显示量
     current_output_length = 0
     interaction_count = 0  # 跟踪交互次数
     
@@ -130,8 +152,40 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
         "command_completed": False,  # 命令是否已完成
         "no_output_counter": 0,      # 连续无输出计数
         "is_timeout": False,         # 是否已超时
-        "timeout_reason": ""         # 超时原因
+        "timeout_reason": "",        # 超时原因
+        "is_cancelled": False        # 是否被用户取消
     }
+
+    # 创建取消标志 - 用于用户强制中断命令执行
+    cancel_event = threading.Event()
+    
+    # 设置取消命令的快捷键处理
+    def keyboard_interrupt_handler():
+        print_warning("\n检测到键盘中断，正在尝试取消命令执行...")
+        cancel_event.set()
+        command_activity["is_cancelled"] = True
+        # 返回True表示已处理中断
+        return True
+    
+    # 注册取消处理函数 - 但不阻塞当前线程
+    try:
+        # 在后台线程监听中断
+        def monitor_keyboard():
+            while not (command_activity["command_completed"] or 
+                      command_activity["is_timeout"] or 
+                      command_activity["is_cancelled"]):
+                # 检查是否有Ctrl+C输入
+                if msvcrt.kbhit() and msvcrt.getch() == b'\x03':
+                    keyboard_interrupt_handler()
+                    break
+                time.sleep(0.1)
+        
+        # 启动监控线程
+        monitor_thread = threading.Thread(target=monitor_keyboard)
+        monitor_thread.daemon = True
+        monitor_thread.start()
+    except Exception as e:
+        print(f"设置键盘中断处理失败: {str(e)}")
 
     # 尝试多种编码的解码函数 - 使用缓存减少重复解码尝试
     encoding_cache = {}
@@ -273,6 +327,7 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
             上下文:
             {context_str}
             当前提示: {prompt_text}
+            {'⚠️ 注意：当前是--dry-run模式，请确保响应与此模式兼容' if is_dry_run else ''}
             请以用户身份分析并给出响应。
             """
             
@@ -295,6 +350,11 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
                 if json_match:
                     result = json.loads(json_match.group(1))
                     needs_user = result.get("needs_user_input", False)
+                    
+                    # 在dry-run模式下，自动倾向于回答"y"以允许查看会发生什么
+                    if is_dry_run and not needs_user:
+                        return "y", 0.9, False
+                        
                     return (
                         result.get("response", "y"), 
                         result.get("confidence", 0.5),
@@ -323,6 +383,12 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
         check_interval = 2  # 秒
         
         while True:
+            # 检查是否被用户取消
+            if cancel_event.is_set():
+                print_warning("\n命令执行被用户取消")
+                command_activity["is_cancelled"] = True
+                break
+                
             # 检查是否超时
             if (time.time() - start_time) > timeout:
                 command_activity["is_timeout"] = True
@@ -407,10 +473,21 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
                     # 获取LLM的响应建议
                     response, confidence, needs_user_input = await get_llm_suggestion(interaction_context, context_buffer)
                     
-                    if needs_user_input:
+                    # 在dry-run模式下，自动回答yes/y以模拟执行过程
+                    if is_dry_run and confidence >= 0.5:
+                        print(f"\n[干运行模式] 自动回复: y")
+                        user_input = "y"
+                    elif needs_user_input:
                         # 需要用户提供特定信息
                         print_info(f"\n需要您提供：")
                         user_input = await get_user_input_async("请输入: ", 30)
+                        
+                        # 检查用户是否想要取消命令
+                        if user_input and user_input.lower() in ["cancel", "exit", "quit", "abort", "取消", "退出"]:
+                            print_warning("\n用户请求取消命令")
+                            cancel_event.set()
+                            command_activity["is_cancelled"] = True
+                            break
                     elif confidence > 0.7:  # 提高置信度阈值
                         # 高置信度时，直接模拟用户输入
                         print(f"> {response}")
@@ -428,6 +505,13 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
                                 timeout=20  # 增加超时时间
                             )
                             user_input = custom_input.strip() if custom_input.strip() else response
+                            
+                            # 检查用户是否想要取消命令
+                            if user_input.lower() in ["cancel", "exit", "quit", "abort", "取消", "退出"]:
+                                print_warning("\n用户请求取消命令")
+                                cancel_event.set()
+                                command_activity["is_cancelled"] = True
+                                break
                         except asyncio.TimeoutError:
                             print(f"\n> {response} (自动使用)")
                             user_input = response
@@ -452,8 +536,8 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
     try:
         # 等待命令完成或超时
         while True:
-            # 检查命令是否已完成或超时
-            if command_activity['command_completed'] or command_activity['is_timeout']:
+            # 检查命令是否已完成，超时或被取消
+            if command_activity['command_completed'] or command_activity['is_timeout'] or command_activity['is_cancelled']:
                 # 给一点额外时间收集最后的输出
                 await asyncio.sleep(1.0)
                 break
@@ -501,9 +585,16 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
                     proc.kill()
                 except ProcessLookupError:
                     pass
+    
+    # 如果是干运行模式，添加说明
+    if is_dry_run:
+        buffer += "\n\n[注意] 命令在--dry-run模式下执行，仅预览可能的操作，未实际执行任何更改。"
 
+    # 检查是否被用户取消
+    if command_activity['is_cancelled']:
+        buffer += f"\n\n{'-'*50}\n[系统] 命令执行被用户取消\n{'-'*50}\n"
     # 检查是否因超时而终止
-    if command_activity['is_timeout']:
+    elif command_activity['is_timeout']:
         # 分析可能的超时原因
         timeout_analysis = "超时原因: "
         
@@ -517,32 +608,42 @@ async def powershell_command(command: str, timeout: int = 60) -> str:
             timeout_analysis += "命令执行时间超过预期，可能是处理大量数据或执行复杂计算。"
         
         # 将超时信息添加到结果中
-        buffer += f"\n\n{'-'*50}\n[系统] 命令执行超时 ({timeout}秒)。{timeout_analysis}\n{'-'*50}\n"
+        buffer += f"\n\n{'-'*50}\n[系统] 命令执行超时 ({timeout}秒)\n{'-'*50}\n"
     
-    # 限制输出长度，避免token超限
-    MAX_CHARS = 30000
-    if len(buffer) > MAX_CHARS:
-        # 生成输出摘要
-        summary = generate_output_summary(buffer, client)
-        
+    # 检查输出长度并处理
+    if len(buffer) > 300000:  # 如果超过30万字符，截断长度限制
         # 截取最后的部分
-        truncated_buffer = buffer[-MAX_CHARS:]
+        truncated_buffer = buffer[-300000:]
         # 找到第一个完整行的开始位置
         first_newline = truncated_buffer.find('\n')
         if first_newline > 0:
             truncated_buffer = truncated_buffer[first_newline+1:]
         
-        # 添加截断提示和摘要
-        truncated_buffer = f"\n===== 输出摘要 =====\n{summary}\n===================\n\n... [输出过长，已截断前面 {len(buffer) - MAX_CHARS} 个字符] ...\n" + truncated_buffer
-        print_warning(f"输出过长（{len(buffer)} 字符），已自动截断并生成摘要")
+        # 添加截断提示
+        truncated_buffer = f"\n... [输出过长，已截断前面 {len(buffer) - 300000} 个字符] ...\n" + truncated_buffer
+        print_warning(f"输出过长（{len(buffer)} 字符），已自动截断")
         return truncated_buffer
+    elif len(buffer) > 10000:  # 如果超过1万字符但不超过30万，使用LLM生成摘要
+        # 生成输出摘要
+        if not client:
+            client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
+        summary = generate_output_summary(buffer, client)
         
+        # 在结果前添加摘要
+        buffer = f"\n===== 命令执行结果摘要 =====\n{summary}\n===================\n\n" + buffer
+        print_info("由于输出较长（超过10000字符），已生成命令执行结果摘要")
+    
+    # 返回完整输出（可能包含摘要）
     return buffer
 
 # 生成命令输出摘要
 def generate_output_summary(output, client):
-    """使用LLM生成命令输出的摘要"""
+    """使用LLM生成命令输出的摘要，添加更多的分析内容"""
     try:
+        # 初始化客户端（如果尚未初始化）
+        if not client:
+            client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
+            
         # 提取输出的前后部分用于分析
         head = output[:2000] if len(output) > 2000 else output
         tail = output[-2000:] if len(output) > 4000 else output[len(head):]
@@ -554,6 +655,8 @@ def generate_output_summary(output, client):
 2. 操作结果和成功状态
 3. 重要的数据或统计信息
 4. 任何异常情况
+5. 执行结果是否成功，如有失败提供失败原因
+6. 文件系统操作结果（如有）
 
 输出内容前部分:
 ```
@@ -563,14 +666,14 @@ def generate_output_summary(output, client):
 {f"输出内容后部分(总长度约 {len(output)} 字符):" if len(output) > 4000 else ""}
 {f"```\\n{tail}\\n```" if len(output) > 4000 else ""}
 
-请提供简洁的摘要，重点关注关键信息和操作结果。
+请用中文回答，提供简洁而有信息量的摘要，重点是命令的执行结果和状态。请使用简单明了的语言，总结不超过200字。
 """
         
         # 调用API生成摘要
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "你是一个专业的命令输出分析助手，擅长提取和总结控制台输出中的关键信息。"},
+                {"role": "system", "content": "你是一个专业的命令输出分析助手，擅长提取和总结控制台输出中的关键信息，用简明的中文回答。"},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
@@ -628,8 +731,9 @@ async def cmd_command(command: str, timeout: int = 60) -> str:
     
     last_output_time = time.time()  # 记录最后一次有输出的时间
     
-    max_console_output = 500  # 限制控制台输出的最大字符数
+    max_console_output = 5000  # 增加控制台输出的最大字符数，提高控制台显示量
     current_output_length = 0
+    interaction_count = 0  # 跟踪交互次数
     
     # 命令执行状态
     command_activity = {
@@ -1026,24 +1130,30 @@ async def cmd_command(command: str, timeout: int = 60) -> str:
             timeout_analysis += "命令执行时间超过预期，可能是处理大量数据或执行复杂计算。"
         
         # 将超时信息添加到结果中
-        buffer += f"\n\n{'-'*50}\n[系统] 命令执行超时 ({timeout}秒)。{timeout_analysis}\n{'-'*50}\n"
+        buffer += f"\n\n{'-'*50}\n[系统] 命令执行超时 ({timeout}秒)\n{'-'*50}\n"
     
-    # 限制输出长度，避免token超限
-    MAX_CHARS = 30000
-    if len(buffer) > MAX_CHARS:
-        # 生成输出摘要
-        summary = generate_output_summary(buffer, client)
-        
+    # 检查输出长度并处理
+    if len(buffer) > 300000:  # 如果超过30万字符，截断长度限制
         # 截取最后的部分
-        truncated_buffer = buffer[-MAX_CHARS:]
+        truncated_buffer = buffer[-300000:]
         # 找到第一个完整行的开始位置
         first_newline = truncated_buffer.find('\n')
         if first_newline > 0:
             truncated_buffer = truncated_buffer[first_newline+1:]
         
-        # 添加截断提示和摘要
-        truncated_buffer = f"\n===== 输出摘要 =====\n{summary}\n===================\n\n... [输出过长，已截断前面 {len(buffer) - MAX_CHARS} 个字符] ...\n" + truncated_buffer
-        print_warning(f"输出过长（{len(buffer)} 字符），已自动截断并生成摘要")
+        # 添加截断提示
+        truncated_buffer = f"\n... [输出过长，已截断前面 {len(buffer) - 300000} 个字符] ...\n" + truncated_buffer
+        print_warning(f"输出过长（{len(buffer)} 字符），已自动截断")
         return truncated_buffer
+    elif len(buffer) > 10000:  # 如果超过1万字符但不超过30万，使用LLM生成摘要
+        # 生成输出摘要
+        if not client:
+            client = OpenAI(api_key=os.environ.get("api_key"), base_url="https://api.deepseek.com")
+        summary = generate_output_summary(buffer, client)
         
+        # 在结果前添加摘要
+        buffer = f"\n===== 命令执行结果摘要 =====\n{summary}\n===================\n\n" + buffer
+        print_info("由于输出较长（超过10000字符），已生成命令执行结果摘要")
+    
+    # 返回完整输出（可能包含摘要）
     return buffer 

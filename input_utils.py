@@ -268,13 +268,21 @@ async def get_user_input_async(prompt: str, timeout: int = 30) -> Optional[str]:
     except Exception:
         print("\n等待用户输入...")
     
-    # 如果没有事件循环，创建一个
+    # 获取当前事件循环而不是创建新的
     try:
         loop = asyncio.get_running_loop()
+        if not loop or loop.is_closed():
+            # 只有在没有运行循环时才创建新的
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            create_new_loop = True
+        else:
+            create_new_loop = False
     except RuntimeError:
         # 如果没有运行中的循环，创建一个新的
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        create_new_loop = True
     
     # 创建结果Future和停止事件
     result_future = loop.create_future()
@@ -347,6 +355,13 @@ async def get_user_input_async(prompt: str, timeout: int = 30) -> Optional[str]:
                 stop_event.set()
             except Exception:
                 pass
+            
+            # 如果是我们创建的新循环，确保关闭它
+            if create_new_loop and loop and not loop.is_closed():
+                try:
+                    loop.close()
+                except Exception as e:
+                    print(f"关闭事件循环时出错: {str(e)}")
     except Exception as e:
         print(f"获取用户输入时出错: {str(e)}")
         return None

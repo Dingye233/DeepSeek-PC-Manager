@@ -1,0 +1,5 @@
+请选择启动模式：
+1. GUI 模式 (deepseek_gui.py)
+2. 语音终端控制台模式 (aaaa.py)
+3. 普通控制台模式 (deepseekAPI)
+请输入选项（1/2/3）：

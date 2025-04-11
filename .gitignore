@@ -1,5 +1,4 @@
-.env
-user_information.txt
-deepseekAPI.py.bak
-deepseekAPI.py.bak2
 
+
+.env
+venv
